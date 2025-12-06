@@ -17,6 +17,7 @@ from ai_utils import AIUtils
 from collections import defaultdict
 from icebreakers.imessage import parse_statements, format_partner_share
 from icebreakers.bucketlist import parse_bucketlist, format_shared_bucketlist, format_captured
+from realworld.bucketlist import get_real_world_recommendations
 
 load_dotenv()
 
@@ -285,6 +286,14 @@ class SeriesSwarm:
                 self.state.set_intro(phone, "Skipped setup (testing).")
             self.state.set_status(phone, Status.READY)
             self.send(chat_id, phone, "Setup skipped (testing).")
+            return True
+        elif cmd == 'setcity':
+            if not arg:
+                self.send(chat_id, phone, "Usage: /setcity <city>")
+                return True
+            city = arg.strip()
+            self.switchboard.store_user_profile(phone, {"city": city})
+            self.send(chat_id, phone, f"City set to: {city}")
             return True
         elif cmd == 'icebreaker':
             return self.handle_icebreaker(phone, chat_id)
@@ -696,6 +705,36 @@ Send /help for all commands."""
                     self.send(partner_chat, partner, suggestions_text)
             except Exception as e:
                 logger.error(f"Bucketlist suggestions error: {e}", exc_info=True)
+
+            # Real-world places recommendations (requires city and Google Maps API key)
+            profile_me = self.switchboard.get_user_profile(user_id)
+            profile_partner = self.switchboard.get_user_profile(partner)
+            city = profile_me.get("city") or profile_partner.get("city")
+            if city:
+                try:
+                    places = get_real_world_recommendations(me_items, partner_items, city)
+                    if places:
+                        lines = [f"📍 Real places in {city} that match your bucket list:"]
+                        for place in places:
+                            label = place.get("type", "").capitalize() or "Idea"
+                            name = place.get("name", "")
+                            addr = place.get("address", "")
+                            url = place.get("url", "")
+                            line = f"- [{label}] {name}"
+                            if addr:
+                                line += f" — {addr}"
+                            if url:
+                                line += f" — {url}"
+                            lines.append(line)
+                        real_text = "\n".join(lines)
+                        if chat_id:
+                            self.send(chat_id, user_id, real_text)
+                        if partner_chat:
+                            self.send(partner_chat, partner, real_text)
+                except Exception as e:
+                    logger.error(f"Real-world bucketlist recs error: {e}", exc_info=True)
+            else:
+                logger.info("No city set for pair; skipping real-world bucketlist recommendations.")
 
             self.state.clear_bucketlist(user_id, partner)
 

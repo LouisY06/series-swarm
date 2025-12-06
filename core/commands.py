@@ -23,6 +23,7 @@ class CommandHandler:
         'topics': ['/topics'],
         'card': ['/card', 'card'],
         'override': ['/override'],
+        'setcity': ['/setcity'],
         'icebreaker': ['/icebreaker'],
         'icebreakers': ['/icebreakers'],
         'bucketlist': ['/bucketlist'],
@@ -102,6 +103,7 @@ class CommandHandler:
 /mood - Current tone from recent chat
 /topics - Key topics from recent chat
 /card - Mini profile of your partner
+/setcity <city> - Set your city for local recs
 /icebreaker - Start Two Truths and a Lie
 /icebreakers - In-chat Two Truths and a Lie (truth, truth, lie)
 /help - Show this message"""

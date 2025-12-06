@@ -160,6 +160,94 @@ Output only the bullet list, nothing else.
                 "- Go for a food crawl that fits both your tastes.\n"
                 "- Combine your most adventurous idea into a future trip."
             )
+
+    def generate_bucketlist_themes(
+        self,
+        me_items: Dict[str, str],
+        partner_items: Dict[str, str]
+    ) -> List[Dict[str, str]]:
+        """
+        Reduce two bucket lists into 2-4 themes for real-world search.
+        Returns a list of dicts with keys: label, query, type.
+        """
+
+        def _fmt(items: Dict[str, str]) -> str:
+            return (
+                f"1) Travel: {items.get('travel', '').strip()}\n"
+                f"2) Skill: {items.get('skill', '').strip()}\n"
+                f"3) Food: {items.get('food', '').strip()}\n"
+                f"4) Adventure: {items.get('adventure', '').strip()}\n"
+                f"5) Creative: {items.get('creative', '').strip()}\n"
+            )
+
+        me_text = _fmt(me_items)
+        partner_text = _fmt(partner_items)
+
+        prompt = f"""
+Given these two bucket lists, output a JSON array of 2-4 themes.
+Each theme object must have: label, query, type (travel|food|adventure|creative|experience).
+Keep queries short (3-6 tokens) for place search.
+
+Bucket list A:
+{me_text}
+
+Bucket list B:
+{partner_text}
+
+Return ONLY JSON. No extra text.
+"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You convert bucket lists into concise search themes for real-world recommendations."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.4,
+                max_tokens=300
+            )
+            content = response.choices[0].message.content.strip()
+            import json
+            themes = json.loads(content)
+            # Basic validation
+            cleaned = []
+            for t in themes:
+                if not isinstance(t, dict):
+                    continue
+                cleaned.append({
+                    "label": t.get("label", "").strip() or "Idea",
+                    "query": t.get("query", "").strip(),
+                    "type": t.get("type", "").strip() or "experience",
+                })
+            return cleaned[:4] if cleaned else []
+        except Exception as e:
+            logger.error(f"Error generating bucketlist themes: {e}")
+            # Fallback heuristic themes from the items
+            merged = [
+                me_items.get("travel", ""),
+                partner_items.get("travel", ""),
+                me_items.get("food", ""),
+                partner_items.get("food", ""),
+                me_items.get("adventure", ""),
+                partner_items.get("adventure", ""),
+                me_items.get("creative", ""),
+                partner_items.get("creative", ""),
+                me_items.get("skill", ""),
+                partner_items.get("skill", ""),
+            ]
+            merged = [m for m in merged if m and m.strip()]
+            top = merged[:3] if merged else ["bucket list"]
+            fallback_query = " ".join(top)
+            return [
+                {"label": "Shared trip", "query": fallback_query, "type": "travel"},
+                {"label": "Shared food", "query": " ".join(top[:2]), "type": "food"},
+            ]
     
     def generate_profile_resume(
         self,
