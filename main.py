@@ -29,6 +29,10 @@ class SeriesSwarm:
         self.kafka_broker = os.getenv('KAFKA_BROKER')
         self.kafka_topic_in = os.getenv('KAFKA_TOPIC_IN', 'hackathon-inbound')
         self.kafka_topic_out = os.getenv('KAFKA_TOPIC_OUT', 'hackathon-outbound')
+        self.kafka_group_id = os.getenv('KAFKA_GROUP_ID', 'series-swarm-group')
+        self.kafka_client_id = os.getenv('KAFKA_CLIENT_ID')
+        self.kafka_sasl_username = os.getenv('KAFKA_SASL_USERNAME')
+        self.kafka_sasl_password = os.getenv('KAFKA_SASL_PASSWORD')  # API Key for Confluent Cloud
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
 
         # Validate required configuration
@@ -39,8 +43,21 @@ class SeriesSwarm:
 
         # Initialize components
         logger.info("Initializing SeriesSwarm components...")
-        self.consumer = KafkaConsumer(self.kafka_broker, self.kafka_topic_in)
-        self.producer = KafkaProducer(self.kafka_broker, self.kafka_topic_out)
+        self.consumer = KafkaConsumer(
+            self.kafka_broker,
+            self.kafka_topic_in,
+            group_id=self.kafka_group_id,
+            sasl_username=self.kafka_sasl_username,
+            sasl_password=self.kafka_sasl_password,
+            client_id=self.kafka_client_id
+        )
+        self.producer = KafkaProducer(
+            self.kafka_broker,
+            self.kafka_topic_out,
+            sasl_username=self.kafka_sasl_username,
+            sasl_password=self.kafka_sasl_password,
+            client_id=self.kafka_client_id
+        )
         self.router = Router(self.openai_api_key)
 
         self.running = False

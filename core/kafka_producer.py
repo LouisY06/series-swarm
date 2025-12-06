@@ -12,13 +12,17 @@ logger = logging.getLogger(__name__)
 class KafkaProducer:
     """Wrapper around confluent-kafka Producer for publishing messages to Kafka topics."""
 
-    def __init__(self, broker: str, topic: str):
+    def __init__(self, broker: str, topic: str, sasl_username: Optional[str] = None,
+                 sasl_password: Optional[str] = None, client_id: Optional[str] = None):
         """
         Initialize Kafka producer.
 
         Args:
             broker: Kafka broker address (e.g., 'localhost:9092')
             topic: Topic name to produce to
+            sasl_username: SASL username for authentication (for Confluent Cloud)
+            sasl_password: SASL password/API key for authentication (for Confluent Cloud)
+            client_id: Client ID for the producer
         """
         self.broker = broker
         self.topic = topic
@@ -26,6 +30,20 @@ class KafkaProducer:
         config = {
             'bootstrap.servers': broker,
         }
+
+        # Add client ID if provided
+        if client_id:
+            config['client.id'] = client_id
+
+        # Add SASL authentication if credentials provided (Confluent Cloud)
+        if sasl_username and sasl_password:
+            config.update({
+                'security.protocol': 'SASL_SSL',
+                'sasl.mechanisms': 'PLAIN',
+                'sasl.username': sasl_username,
+                'sasl.password': sasl_password,
+            })
+            logger.info("SASL authentication enabled for producer")
 
         self.producer = Producer(config)
         logger.info(f"Kafka producer initialized for topic: {topic}")

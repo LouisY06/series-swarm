@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 class KafkaConsumer:
     """Wrapper around confluent-kafka Consumer for consuming messages from Kafka topics."""
 
-    def __init__(self, broker: str, topic: str, group_id: str = 'series-swarm-group'):
+    def __init__(self, broker: str, topic: str, group_id: str = 'series-swarm-group',
+                 sasl_username: Optional[str] = None, sasl_password: Optional[str] = None,
+                 client_id: Optional[str] = None):
         """
         Initialize Kafka consumer.
 
@@ -19,6 +21,9 @@ class KafkaConsumer:
             broker: Kafka broker address (e.g., 'localhost:9092')
             topic: Topic name to consume from
             group_id: Consumer group ID
+            sasl_username: SASL username for authentication (for Confluent Cloud)
+            sasl_password: SASL password/API key for authentication (for Confluent Cloud)
+            client_id: Client ID for the consumer
         """
         self.broker = broker
         self.topic = topic
@@ -30,6 +35,20 @@ class KafkaConsumer:
             'auto.offset.reset': 'earliest',
             'enable.auto.commit': True,
         }
+
+        # Add client ID if provided
+        if client_id:
+            config['client.id'] = client_id
+
+        # Add SASL authentication if credentials provided (Confluent Cloud)
+        if sasl_username and sasl_password:
+            config.update({
+                'security.protocol': 'SASL_SSL',
+                'sasl.mechanisms': 'PLAIN',
+                'sasl.username': sasl_username,
+                'sasl.password': sasl_password,
+            })
+            logger.info("SASL authentication enabled for consumer")
 
         self.consumer = Consumer(config)
         self.consumer.subscribe([topic])
