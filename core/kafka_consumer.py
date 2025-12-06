@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Optional, Dict, Any
 from confluent_kafka import Consumer, KafkaError
 
@@ -25,12 +26,17 @@ class KafkaConsumer:
         self.topic = topic
         self.group_id = group_id
 
+        # Use unique group ID to avoid stale consumer state
+        unique_group = f"{group_id}-{int(time.time())}"
+        
         config = {
             'bootstrap.servers': broker,
-            'group.id': group_id,
+            'group.id': unique_group,
             'auto.offset.reset': 'latest',
             'enable.auto.commit': True,
         }
+        
+        logger.info(f"Using consumer group: {unique_group}")
 
         if client_id:
             config['client.id'] = client_id
