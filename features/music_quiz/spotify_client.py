@@ -119,11 +119,25 @@ class SpotifyClient:
                 scope=self.scope
             )
             
-            if oauth.is_token_expired(token_info):
-                token_info = oauth.refresh_access_token(token_info['refresh_token'])
-                self.user_tokens[user_phone] = token_info
+            # Check if token is expired and refresh if needed
+            try:
+                if oauth.is_token_expired(token_info):
+                    refresh_token = token_info.get('refresh_token')
+                    if refresh_token:
+                        token_info = oauth.refresh_access_token(refresh_token)
+                        self.user_tokens[user_phone] = token_info
+                    else:
+                        logger.error(f"No refresh token available for {user_phone}")
+                        return None
+            except Exception as refresh_error:
+                logger.warning(f"Error checking/refreshing token for {user_phone}: {refresh_error}, trying anyway")
             
-            return spotipy.Spotify(auth=token_info['access_token'])
+            access_token = token_info.get('access_token')
+            if not access_token:
+                logger.error(f"No access token for {user_phone}")
+                return None
+            
+            return spotipy.Spotify(auth=access_token)
             
         except Exception as e:
             logger.error(f"Error getting Spotify client for {user_phone}: {e}")
