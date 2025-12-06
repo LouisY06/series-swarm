@@ -1,0 +1,7 @@
+confluent-kafka>=2.3.0
+openai>=1.0.0
+fpdf2>=2.7.0
+icalendar>=5.0.0
+vobject>=0.9.6.1
+python-dotenv>=1.0.0
+
