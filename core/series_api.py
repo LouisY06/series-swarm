@@ -124,9 +124,22 @@ class SeriesAPI:
 
     def get_chat_id(self, message_data: Dict[str, Any]) -> Optional[int]:
         """Extract chat_id from Kafka message."""
-        data = message_data.get('data', {})
-        chat_id = data.get('chat_id') or data.get('id')
+        data = message_data.get('data', {}) or {}
+
+        # Try multiple common shapes we have observed from Series events
+        chat_id = (
+            data.get('chat_id')
+            or data.get('id')
+            or (data.get('chat') or {}).get('id')
+            or (data.get('chat') or {}).get('chat_id')
+        )
+
         if chat_id:
-            return int(chat_id)
+            try:
+                return int(chat_id)
+            except (TypeError, ValueError):
+                logger.warning(f"Non-integer chat_id found in message: {chat_id}")
+
+        logger.warning(f"No chat_id found in message_data: keys={list(data.keys())}")
         return None
 
