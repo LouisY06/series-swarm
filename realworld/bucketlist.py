@@ -91,3 +91,64 @@ def get_real_world_recommendations(me_items: Dict[str, str], partner_items: Dict
 
     return all_places[:6]
 
+
+def get_top_bucketlist_spots(me_items: Dict[str, str], partner_items: Dict[str, str], city: str) -> List[Dict[str, str]]:
+    """
+    Return up to 3 'top spots' with label, name, address, url, rating, reason, type.
+    """
+    if not city:
+        return []
+
+    ai = AIUtils()
+    themes = ai.generate_bucketlist_themes(me_items, partner_items)
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key or not themes:
+        return []
+
+    def search_top_place(theme: Dict[str, str]) -> Dict[str, str]:
+        query = f"{theme.get('query', '')} {city}".strip()
+        url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
+        params = {"query": query, "key": api_key}
+        try:
+            resp = requests.get(url, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception:
+            return {}
+
+        results = data.get("results", [])
+        if not results:
+            return {}
+
+        best = max(
+            results,
+            key=lambda r: (r.get("rating", 0), r.get("user_ratings_total", 0))
+        )
+
+        name = best.get("name", "")
+        if not name:
+            return {}
+        address = best.get("formatted_address", "")
+        rating = best.get("rating", 0)
+        place_id = best.get("place_id")
+        place_url = f"https://www.google.com/maps/place/?q=place_id:{place_id}" if place_id else ""
+
+        reason = ai.explain_why_place_fits_bucketlist(theme, name, address, rating)
+
+        return {
+            "label": theme.get("label", "Idea"),
+            "name": name,
+            "address": address,
+            "url": place_url,
+            "rating": rating,
+            "reason": reason,
+            "type": theme.get("type", ""),
+        }
+
+    tops: List[Dict[str, str]] = []
+    for theme in themes:
+        place = search_top_place(theme)
+        if place:
+            tops.append(place)
+    return tops[:3]
+

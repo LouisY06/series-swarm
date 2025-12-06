@@ -7,6 +7,7 @@ import signal
 import threading
 import time
 import uuid
+import re
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
@@ -17,7 +18,7 @@ from ai_utils import AIUtils
 from collections import defaultdict
 from icebreakers.imessage import parse_statements, format_partner_share
 from icebreakers.bucketlist import parse_bucketlist, format_shared_bucketlist, format_captured
-from realworld.bucketlist import get_real_world_recommendations
+from realworld.bucketlist import get_real_world_recommendations, get_top_bucketlist_spots
 
 # Music Quiz feature (optional - gracefully handles missing dependencies)
 try:
@@ -312,13 +313,11 @@ class SeriesSwarm:
             self.send(chat_id, phone, "I don't recognize that command. Type /help for a list of commands.")
             return True
         elif cmd == 'setcity':
-            if not arg:
-                self.send(chat_id, phone, "Usage: /setcity <city>")
-                return True
-            city = arg.strip()
-            self.switchboard.store_user_profile(phone, {"city": city})
-            self.send(chat_id, phone, f"City set to: {city}")
-            return True
+            return self.handle_setcity(phone, chat_id, arg)
+        elif cmd == 'cityyes':
+            return self.handle_city_confirm(phone, chat_id, approved=True)
+        elif cmd == 'cityno':
+            return self.handle_city_confirm(phone, chat_id, approved=False)
         elif cmd == 'icebreaker':
             return self.handle_icebreaker(phone, chat_id)
         elif cmd == 'icebreakers':
@@ -329,6 +328,8 @@ class SeriesSwarm:
             return self.handle_spotify(phone, chat_id)
         elif cmd == 'quiz':
             return self.handle_quiz(phone, chat_id, arg)
+        elif cmd == 'topspots':
+            return self.handle_topspots(phone, chat_id)
 
         else:
             response = self.commands.execute_command(self.switchboard, phone, cmd, arg)
@@ -347,12 +348,21 @@ First, what's your name?"""
 
     def handle_onboarding_name(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
         """Handle name input during onboarding."""
-        name = text.strip()
-        if name.startswith('/'):
-            self.send(chat_id, user_id, "That looks like a command. Please enter your name without '/'.")
-            return True
-        if len(name) < 1 or len(name) > 50:
-            self.send(chat_id, user_id, "Please enter a valid name (1-50 characters).")
+        def clean_name(raw: str) -> str:
+            t = raw.strip()
+            # Normalize curly apostrophes
+            t = t.replace("’", "'").replace("`", "'")
+            # Strip common leading "I'm/Im/I am"
+            t = re.sub(r"^(i\s*'?m|i\s+am)\s+", "", t, flags=re.IGNORECASE)
+            # Remove non-letter characters except space, hyphen, apostrophe
+            t = re.sub(r"[^A-Za-z\s'\-]", "", t)
+            # Collapse multiple spaces
+            t = " ".join(t.split())
+            return t
+
+        name = clean_name(text)
+        if not name or len(name) > 50 or any(ch.isdigit() for ch in name) or len(name.split()) > 4:
+            self.send(chat_id, user_id, "Please enter a short name using letters only (e.g., Alana or Alana Smith).")
             return True
         
         # Store name in profile
@@ -775,6 +785,11 @@ Send /help for all commands."""
                             if url:
                                 line += f" — {url}"
                             lines.append(line)
+                        lines += [
+                            "",
+                            "Reply /topspots if you want one top-rated place per idea,",
+                            "with rating and why it fits your bucket list."
+                        ]
                         real_text = "\n".join(lines)
                         if chat_id:
                             self.send(chat_id, user_id, real_text)
@@ -804,6 +819,133 @@ Send /help for all commands."""
 
             self.state.clear_bucketlist(user_id, partner)
 
+        return True
+
+    def handle_topspots(self, phone: str, chat_id: Optional[int]) -> bool:
+        """Provide top-rated places per bucketlist theme on demand."""
+        partner = self.state.get_partner(phone)
+        if not partner:
+            self.send(chat_id, phone, "You need to be in a conversation first.")
+            return True
+
+        pair_entries = self.state.get_bucketlist_pair(phone, partner)
+        me_items = pair_entries.get(phone)
+        partner_items = pair_entries.get(partner)
+        if not me_items or not partner_items:
+            self.send(chat_id, phone, "I don't have a shared bucket list for you two yet. Try /bucketlist first.")
+            return True
+
+        profile_self = self.switchboard.get_user_profile(phone)
+        profile_partner = self.switchboard.get_user_profile(partner)
+        city = (profile_self.get("city") or profile_partner.get("city") or "").strip()
+        if not city:
+            self.send(chat_id, phone, "Set your city first so I can find real places. Use /setcity <city>.")
+            return True
+
+        try:
+            tops = get_top_bucketlist_spots(me_items, partner_items, city)
+        except Exception as e:
+            logger.error(f"Error computing top spots for {phone}: {e}", exc_info=True)
+            self.send(chat_id, phone, "I had trouble finding specific places just now.")
+            return True
+
+        if not tops:
+            self.send(chat_id, phone, f"I couldn't find good top-rated matches in {city} right now.")
+            return True
+
+        lines = [f"🎯 Top picks for your shared bucket list in {city}:"]
+        for spot in tops:
+            label = spot.get("label", "Idea")
+            name = spot.get("name", "")
+            addr = spot.get("address", "")
+            rating = spot.get("rating", 0)
+            url = spot.get("url", "")
+            reason = spot.get("reason", "")
+
+            lines.append("")
+            lines.append(f"• {label}:")
+            core = f"  {name}"
+            if rating:
+                core += f" ({rating:.1f}★)"
+            lines.append(core)
+            if addr:
+                lines.append(f"  {addr}")
+            if reason:
+                lines.append(f"  {reason}")
+            if url:
+                lines.append(f"  {url}")
+
+        msg = "\n".join(lines)
+
+        chat_self = chat_id or self.state.get_chat_id(phone) or self.switchboard.get_chat_id(phone)
+        chat_partner = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+
+        if chat_self:
+            self.send(chat_self, phone, msg)
+        if chat_partner:
+            self.send(chat_partner, partner, msg)
+
+        return True
+
+    def handle_setcity(self, phone: str, chat_id: Optional[int], arg: Optional[str]) -> bool:
+        """Set city; if paired, request partner confirmation."""
+        if not arg or not arg.strip():
+            self.send(chat_id, phone, "Usage: /setcity <city>")
+            return True
+        city = arg.strip()
+        partner = self.state.get_partner(phone)
+        if not partner:
+            # Not paired; set directly
+            self.switchboard.store_user_profile(phone, {"city": city})
+            self.send(chat_id, phone, f"City set to: {city}")
+            return True
+
+        # Paired: request confirmation from partner
+        self.state.set_pending_city(phone, partner, city, set_by=phone)
+        self.send(chat_id, phone, f"Requested city set to: {city}. Waiting for your partner to confirm (/cityyes or /cityno).")
+        partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+        if partner_chat:
+            self.send(
+                partner_chat,
+                partner,
+                f"Your partner wants to set the city to: {city}. Reply /cityyes to accept or /cityno to decline."
+            )
+        return True
+
+    def handle_city_confirm(self, phone: str, chat_id: Optional[int], approved: bool) -> bool:
+        """Handle /cityyes or /cityno from partner."""
+        partner = self.state.get_partner(phone)
+        if not partner:
+            self.send(chat_id, phone, "You need to be in a conversation first.")
+            return True
+        pending = self.state.get_pending_city(phone, partner)
+        if not pending:
+            self.send(chat_id, phone, "No city change pending.")
+            return True
+
+        city = pending.get("city", "")
+        set_by = pending.get("set_by", "")
+        partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+
+        if approved:
+            # Apply city to both users
+            self.switchboard.store_user_profile(phone, {"city": city})
+            self.switchboard.store_user_profile(partner, {"city": city})
+            self.state.clear_pending_city(phone, partner)
+            msg_self = f"City set to: {city} (confirmed)."
+            msg_partner = f"City set to: {city} (you confirmed)."
+            if chat_id:
+                self.send(chat_id, phone, msg_self)
+            if partner_chat:
+                self.send(partner_chat, partner, msg_partner)
+        else:
+            self.state.clear_pending_city(phone, partner)
+            decline_self = "City change declined. You can propose another with /setcity <city>."
+            decline_partner = "City change declined. Propose another city with /setcity <city>."
+            if chat_id:
+                self.send(chat_id, phone, decline_self)
+            if partner_chat:
+                self.send(partner_chat, partner, decline_partner)
         return True
 
     def handle_card(self, user_id: str, chat_id: Optional[int]) -> bool:

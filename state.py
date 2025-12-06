@@ -49,6 +49,8 @@ class StateManager:
         # Bucket list state per pair
         self.bucketlist_active: Dict[Tuple[str, str], bool] = {}
         self.bucketlist_entries: Dict[Tuple[str, str], Dict[str, Dict[str, str]]] = {}
+        # Pending city confirmations per pair
+        self.pending_city: Dict[Tuple[str, str], Dict[str, str]] = {}
     
     def get_status(self, user_id: str) -> Status:
         """Get user status, defaulting to IDLE for new users."""
@@ -244,6 +246,19 @@ class StateManager:
         pid = self.pair_id_for(user_a, user_b)
         self.bucketlist_entries.pop(pid, None)
         self.bucketlist_active.pop(pid, None)
+
+    # City confirmation helpers
+    def set_pending_city(self, user_a: str, user_b: str, city: str, set_by: str):
+        pid = self.pair_id_for(user_a, user_b)
+        self.pending_city[pid] = {"city": city, "set_by": set_by}
+
+    def get_pending_city(self, user_a: str, user_b: str) -> Optional[Dict[str, str]]:
+        pid = self.pair_id_for(user_a, user_b)
+        return self.pending_city.get(pid)
+
+    def clear_pending_city(self, user_a: str, user_b: str):
+        pid = self.pair_id_for(user_a, user_b)
+        self.pending_city.pop(pid, None)
 
     # Web icebreaker session helpers
     def set_icebreaker_session(self, user_a: str, user_b: str, session_id: str):

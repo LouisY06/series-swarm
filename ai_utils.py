@@ -322,6 +322,53 @@ Return ONLY JSON. No extra text.
                 {"name": f"{city} art studio", "note": "Painting/drawing session", "type": "creative"},
                 {"name": f"{city} shrine or temple", "note": "Sketch and explore", "type": "adventure"},
             ]
+
+    def explain_why_place_fits_bucketlist(
+        self,
+        theme: Dict[str, str],
+        name: str,
+        address: str,
+        rating: float
+    ) -> str:
+        """
+        Short explanation (1–2 sentences) of why this place matches the theme.
+        """
+        label = theme.get("label", "")
+        query = theme.get("query", "")
+        ttype = theme.get("type", "")
+
+        prompt = f"""
+You are helping two people understand why a real-world place fits their shared bucket list idea.
+
+Theme label: {label}
+Theme query keywords: {query}
+Theme type: {ttype}
+
+Place:
+- Name: {name}
+- Address: {address}
+- Rating: {rating} stars
+
+Write 1–2 short sentences explaining why this place is a good match for their theme.
+Mention the vibe and keep it specific but concise. No emojis.
+"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You explain in plain language why places fit someone's bucket list ideas."
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=120
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Error explaining top spot: {e}")
+            return "It matches your theme well based on location, reviews, and the vibe people describe."
     
     def generate_profile_resume(
         self,
