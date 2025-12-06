@@ -142,4 +142,3 @@ class SeriesAPI:
 
         logger.warning(f"No chat_id found in message_data: keys={list(data.keys())}")
         return None
-
