@@ -21,6 +21,8 @@ class CommandHandler:
         'we': ['/we'],
         'mood': ['/mood'],
         'topics': ['/topics'],
+        'card': ['/card', 'card'],
+        'override': ['/override'],
         'icebreaker': ['/icebreaker'],
         'icebreakers': ['/icebreakers'],
         'bucketlist': ['/bucketlist'],
@@ -99,6 +101,7 @@ class CommandHandler:
 /we - Shared profile of your conversation
 /mood - Current tone from recent chat
 /topics - Key topics from recent chat
+/card - Mini profile of your partner
 /icebreaker - Start Two Truths and a Lie
 /icebreakers - In-chat Two Truths and a Lie (truth, truth, lie)
 /help - Show this message"""

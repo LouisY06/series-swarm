@@ -66,6 +66,8 @@ class SeriesSwarm:
         self.api = SeriesAPI(self.series_api_key)
         self.state = StateManager()
         self.ai = AIUtils()
+        # Track users who just received an AI suggestion; skip AI replies on their immediate response.
+        self.skip_ai_after_prompt = set()
         self.running = False
         self.processed_messages = set()  # Track processed messages to prevent duplicates
 
@@ -276,6 +278,13 @@ class SeriesSwarm:
             return self.handle_mood(phone, chat_id)
         elif cmd == 'topics':
             return self.handle_topics(phone, chat_id)
+        elif cmd == 'override':
+            # Hidden testing shortcut: skip onboarding and mark ready
+            if not self.state.get_intro(phone):
+                self.state.set_intro(phone, "Skipped setup (testing).")
+            self.state.set_status(phone, Status.READY)
+            self.send(chat_id, phone, "Setup skipped (testing).")
+            return True
         elif cmd == 'icebreaker':
             return self.handle_icebreaker(phone, chat_id)
         elif cmd == 'icebreakers':
@@ -399,6 +408,12 @@ Send /help for all commands."""
         if self.state.icebreaker_active(user_id, partner):
             return self.handle_icebreakers_message(user_id, partner, chat_id, text)
 
+        # If the last message to this user was an AI prompt, skip AI follow-ups for this reply.
+        skip_ai = False
+        if user_id in self.skip_ai_after_prompt:
+            skip_ai = True
+            self.skip_ai_after_prompt.discard(user_id)
+
         # Capture partner last message time before we record this one
         partner_last_ts = self.state.get_last_message_ts_for_user(partner)
 
@@ -414,7 +429,7 @@ Send /help for all commands."""
             return False
         
         # Kick off profile update in the background so it doesn't block sending
-        def _update_profiles_async(chat_id_self: Optional[int], chat_id_partner: Optional[int]):
+        def _update_profiles_async(chat_id_self: Optional[int], chat_id_partner: Optional[int], skip_ai_flag: bool):
             try:
                 total_messages = self.state.get_message_count(user_id, partner)
                 new_level_self, old_level_self, changed_self = self.ai.ensure_profile_updated(
@@ -424,33 +439,17 @@ Send /help for all commands."""
                     self.state, partner, user_id, total_messages
                 )
 
-                if changed_self and chat_id_self:
-                    self.send(chat_id_self, user_id, f"Profile level {new_level_self} unlocked. Use /card to see more.")
-                if changed_partner and chat_id_partner:
-                    self.send(chat_id_partner, partner, f"Profile level {new_level_partner} unlocked. Use /card to see more.")
-
-                # Conversation coach nudges every 6 messages
-                if total_messages >= 6 and total_messages % 6 == 0 and chat_id_self:
-                    conversation = self.state.get_conversation(user_id, partner)
-                    nudge = self.ai.generate_coach_nudge(conversation)
-                    self.send(chat_id_self, user_id, f"💡 {nudge}")
-
-                # Small-talk rescue: if stalled (long gap or one-word replies)
-                now = time.time()
-                gap_partner = now - partner_last_ts if partner_last_ts else 0
-                recent_msgs = self.state.get_last_messages_for_user(user_id)
-                short_count = sum(1 for m in recent_msgs if len(m.strip().split()) <= 2)
-                is_one_word_run = len(recent_msgs) >= 4 and short_count >= 3
-                if chat_id_self and (gap_partner > 180 or is_one_word_run):
-                    conversation = self.state.get_conversation(user_id, partner)
-                    rescue = self.ai.generate_rescue_prompt(conversation)
-                    self.send(chat_id_self, user_id, f"🤝 {rescue}")
+                if not skip_ai_flag:
+                    if changed_self and chat_id_self:
+                        self.send(chat_id_self, user_id, f"Profile level {new_level_self} unlocked. Use /card to see more.")
+                    if changed_partner and chat_id_partner:
+                        self.send(chat_id_partner, partner, f"Profile level {new_level_partner} unlocked. Use /card to see more.")
 
                 logger.info(f"Async profile update done for {user_id} <-> {partner} (total {total_messages})")
             except Exception as e:
                 logger.error(f"Async profile update error: {e}", exc_info=True)
         
-        threading.Thread(target=_update_profiles_async, args=(chat_id, partner_chat), daemon=True).start()
+        threading.Thread(target=_update_profiles_async, args=(chat_id, partner_chat, skip_ai), daemon=True).start()
         
         logger.info(f"Relayed message from {user_id} to {partner} in {time.time() - start_ts:.3f}s")
         return True
@@ -538,21 +537,28 @@ Send /help for all commands."""
         ib = self.state.get_icebreaker(user_id, partner)
         statements_map = ib.get("statements", {})
 
-        if user_id in statements_map:
-            if len(statements_map) == 2:
-                self.send(chat_id, user_id, "Already shared both sets. Keep chatting!")
-            else:
-                self.send(chat_id, user_id, "Got your two truths and a lie. Waiting for your partner.")
-            return True
-
         parsed = parse_statements(text)
+        parsed = [p for p in parsed if p]
         if len(parsed) < 3:
-            self.send(chat_id, user_id, "I need three lines: truth, truth, lie (lie last). Please resend all three.")
+            self.send(
+                chat_id,
+                user_id,
+                "I need at least three lines: truth, truth, lie (lie last). "
+                "Please resend all three in one message."
+            )
             return True
 
         statements = parsed[:3]
+        # Allow overwrite until both have submitted
         self.state.set_icebreaker_statements(user_id, partner, statements, lie_index=2)
-        self.send(chat_id, user_id, "Got your two truths and a lie. Waiting for your partner.")
+        preview = "\n".join(f"{idx+1}. {s}" for idx, s in enumerate(statements))
+        self.send(
+            chat_id,
+            user_id,
+            "Saved your two truths and a lie:\n"
+            f"{preview}\n\n"
+            "If that's wrong, just resend all three lines."
+        )
 
         ib = self.state.get_icebreaker(user_id, partner)
         if len(ib.get("statements", {})) == 2:
@@ -650,7 +656,7 @@ Send /help for all commands."""
         return True
 
     def handle_card(self, user_id: str, chat_id: Optional[int]) -> bool:
-        """Handle /card command - show profile of the other person."""
+        """Handle /card command - show mini profile + interests of the partner."""
         partner = self.state.get_partner(user_id)
         
         if not partner:
@@ -658,14 +664,23 @@ Send /help for all commands."""
             return True
         
         profile = self.state.get_profile(user_id, partner)
+        conversation = self.state.get_conversation(user_id, partner)
+        topics = ""
+        if conversation:
+            topics = self.ai.generate_topics(conversation)
         
         if profile["level"] == 0:
-            self.send(chat_id, user_id, 
-                "I have not learned enough yet. Keep talking to unlock their profile.")
+            body = "I have not learned enough yet. Keep talking to unlock their profile."
         else:
-            msg = "Here is what I have learned about them from your conversation so far:\n\n" + profile["resume"]
-            self.send(chat_id, user_id, msg)
+            body = (
+                "Here is what I have learned about them from your conversation so far:\n\n"
+                f"{profile['resume']}"
+            )
         
+        if topics:
+            body += "\n\nInterests you've been talking about:\n" + topics
+        
+        self.send(chat_id, user_id, body)
         return True
 
     def exchange_contacts(self, user1: str, user2: str) -> bool:
