@@ -67,6 +67,7 @@ class SeriesSwarm:
         self.state = StateManager()
         self.ai = AIUtils()
         self.running = False
+        self.processed_messages = set()  # Track processed messages to prevent duplicates
 
         logger.info("SeriesSwarm initialized")
 
@@ -104,6 +105,17 @@ class SeriesSwarm:
     def process_message(self, message: Dict[str, Any]) -> bool:
         """Process an incoming message."""
         try:
+            # Deduplication: check if we've already processed this message
+            msg_key = (message.get('partition'), message.get('offset'))
+            if msg_key in self.processed_messages:
+                logger.debug(f"Skipping duplicate message: partition={msg_key[0]}, offset={msg_key[1]}")
+                return True
+            self.processed_messages.add(msg_key)
+            # Keep only last 1000 message keys to prevent memory growth
+            if len(self.processed_messages) > 1000:
+                # Remove oldest entries (simple approach: clear and rebuild on next cycle)
+                self.processed_messages = set(list(self.processed_messages)[-500:])
+            
             value = message.get('value', {})
             data = value.get('data', {})
             
@@ -163,8 +175,12 @@ class SeriesSwarm:
             # Handle based on user status
             status = self.state.get_status(from_phone)
             
-            if status == Status.ONBOARDING:
-                return self.handle_onboarding(from_phone, chat_id, text)
+            if status == Status.ONBOARDING_NAME:
+                return self.handle_onboarding_name(from_phone, chat_id, text)
+            elif status == Status.ONBOARDING_EMAIL:
+                return self.handle_onboarding_email(from_phone, chat_id, text)
+            elif status == Status.ONBOARDING_INTRO or status == Status.ONBOARDING:
+                return self.handle_onboarding_intro(from_phone, chat_id, text)
             elif status == Status.CHATTING:
                 return self.handle_chat_message(from_phone, chat_id, text)
             else:
@@ -172,7 +188,7 @@ class SeriesSwarm:
                 if status == Status.IDLE:
                     return self.start_onboarding(from_phone, chat_id)
                 else:
-                    self.send(chat_id, from_phone, "👋 Type /match to find someone to chat with, or /help for commands.")
+                    self.send(chat_id, from_phone, "Type /match to find someone to chat with, or /help for commands.")
                 return True
 
         except Exception as e:
@@ -190,8 +206,13 @@ class SeriesSwarm:
                 self.send(chat_id, phone, "You're already in a conversation! Type /end to disconnect.")
                 return True
             
-            if status == Status.ONBOARDING:
-                self.send(chat_id, phone, "Please finish your intro first, then send /match.")
+            if status in (Status.ONBOARDING, Status.ONBOARDING_NAME, Status.ONBOARDING_EMAIL, Status.ONBOARDING_INTRO):
+                self.send(chat_id, phone, "Please finish setting up your profile first, then send /match.")
+                return True
+            
+            # Prevent duplicate match requests
+            if status == Status.SEARCHING:
+                self.send(chat_id, phone, "Already searching for a match...")
                 return True
             
             if status != Status.READY:
@@ -210,7 +231,7 @@ class SeriesSwarm:
                 # Add to queue
                 self.state.set_status(phone, Status.SEARCHING)
                 self.state.add_to_queue(phone)
-                self.send(chat_id, phone, "🔎 Searching for a match...")
+                self.send(chat_id, phone, "Searching for a match...")
             
             return True
 
@@ -228,25 +249,25 @@ class SeriesSwarm:
                 
                 partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
                 if partner_chat:
-                    self.send(partner_chat, partner, "🚫 Stranger disconnected. Type /match to find someone new.")
-                self.send(chat_id, phone, "✅ Disconnected. Type /match to find someone new.")
+                    self.send(partner_chat, partner, "Stranger disconnected. Type /match to find someone new.")
+                self.send(chat_id, phone, "Disconnected. Type /match to find someone new.")
             else:
-                self.send(chat_id, phone, "❌ You're not connected to anyone.")
+                self.send(chat_id, phone, "You're not connected to anyone.")
             return True
 
         elif cmd == 'reveal':
             if not self.state.get_partner(phone) and not self.switchboard.is_paired(phone):
-                self.send(chat_id, phone, "❌ You're not connected. Type /match first.")
+                self.send(chat_id, phone, "You're not connected. Type /match first.")
                 return True
 
             both, partner = self.switchboard.handle_reveal(phone)
             if both and partner:
                 self.exchange_contacts(phone, partner)
             elif partner:
-                self.send(chat_id, phone, "🔒 Waiting for partner to accept...")
+                self.send(chat_id, phone, "Waiting for partner to accept...")
                 partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
                 if partner_chat:
-                    self.send(partner_chat, partner, "👀 Partner wants to share contact! Type /reveal to accept.")
+                    self.send(partner_chat, partner, "Partner wants to share contact! Type /reveal to accept.")
             return True
 
         elif cmd == 'we':
@@ -270,31 +291,69 @@ class SeriesSwarm:
 
     def start_onboarding(self, user_id: str, chat_id: Optional[int]) -> bool:
         """Start onboarding for a new user."""
-        self.state.set_status(user_id, Status.ONBOARDING)
+        self.state.set_status(user_id, Status.ONBOARDING_NAME)
         welcome_msg = """Welcome! I help you meet someone and slowly build a profile of them based only on your chat.
 
-I’m ready — please send a short intro about yourself and what you are looking for here."""
-
-        guidance = self.ai.generate_onboarding_guidance()
-        self.send(chat_id, user_id, welcome_msg + "\n\n" + guidance)
+First, what's your name?"""
+        self.send(chat_id, user_id, welcome_msg)
         return True
 
-    def handle_onboarding(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
-        """Handle onboarding intro."""
+    def handle_onboarding_name(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
+        """Handle name input during onboarding."""
+        name = text.strip()
+        if len(name) < 1 or len(name) > 50:
+            self.send(chat_id, user_id, "Please enter a valid name (1-50 characters).")
+            return True
+        
+        # Store name in profile
+        self.switchboard.store_user_profile(user_id, {'name': name})
+        self.state.set_status(user_id, Status.ONBOARDING_EMAIL)
+        
+        self.send(chat_id, user_id, f"Nice to meet you, {name}! What's your email? (This will be shared when you /reveal)")
+        logger.info(f"User {user_id} set name: {name}")
+        return True
+
+    def handle_onboarding_email(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
+        """Handle email input during onboarding."""
+        email = text.strip()
+        if '@' not in email or '.' not in email:
+            self.send(chat_id, user_id, "Please enter a valid email address.")
+            return True
+        
+        # Store email in profile
+        self.switchboard.store_user_profile(user_id, {'email': email})
+        self.state.set_status(user_id, Status.ONBOARDING_INTRO)
+        
+        self.send(chat_id, user_id, "Great! Now send a short intro about yourself and what you're looking for.")
+        logger.info(f"User {user_id} set email: {email}")
+        return True
+
+    def handle_onboarding_intro(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
+        """Handle intro input during onboarding."""
         # Store intro
         self.state.set_intro(user_id, text)
         self.state.set_status(user_id, Status.READY)
         
-        response = """Got it. When you want to meet someone, send /match.
+        response = """Got it! Your profile is set up.
 
-Anytime you want, send /help for commands."""
+When you want to meet someone, send /match.
+Send /help for all commands."""
         self.send(chat_id, user_id, response)
         logger.info(f"User {user_id} completed onboarding")
         return True
 
+    def handle_onboarding(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
+        """Legacy handler - redirects to intro handler."""
+        return self.handle_onboarding_intro(user_id, chat_id, text)
+
     def match_two_users(self, user_a: str, user_b: str):
         """Match two users."""
         logger.info(f"Matching {user_a} with {user_b}")
+        
+        # Prevent duplicate matches - check if already matched
+        if self.state.get_partner(user_a) == user_b:
+            logger.info(f"Users {user_a} and {user_b} already matched, skipping")
+            return
         
         chat_a = self.state.get_chat_id(user_a) or self.switchboard.get_chat_id(user_a)
         chat_b = self.state.get_chat_id(user_b) or self.switchboard.get_chat_id(user_b)
@@ -305,9 +364,9 @@ Anytime you want, send /help for commands."""
             self.state.set_status(user_a, Status.READY)
             self.state.set_status(user_b, Status.READY)
             if chat_a:
-                self.send(chat_a, user_a, "⚠️ I had trouble connecting your chat. Try sending /match again.")
+                self.send(chat_a, user_a, "I had trouble connecting your chat. Try sending /match again.")
             if chat_b:
-                self.send(chat_b, user_b, "⚠️ I had trouble connecting your chat. Try sending /match again.")
+                self.send(chat_b, user_b, "I had trouble connecting your chat. Try sending /match again.")
             return
         
         # Set partners and status now that chat_ids are confirmed
@@ -321,7 +380,7 @@ Anytime you want, send /help for commands."""
         
         # Send connection messages - use send() which will retrieve chat_id from stored state
         # This avoids creating new chats if chat_id wasn't passed
-        msg = "🤝 Connected! Say hi. (Type /end to disconnect, /card to see their profile)"
+        msg = "Connected! Say hi. (Type /end to disconnect, /card to see their profile)"
         
         self.send(chat_a, user_a, msg)
         self.send(chat_b, user_b, msg)
@@ -366,9 +425,9 @@ Anytime you want, send /help for commands."""
                 )
 
                 if changed_self and chat_id_self:
-                    self.send(chat_id_self, user_id, f"🎯 Profile level {new_level_self} unlocked. Use /card to see more.")
+                    self.send(chat_id_self, user_id, f"Profile level {new_level_self} unlocked. Use /card to see more.")
                 if changed_partner and chat_id_partner:
-                    self.send(chat_id_partner, partner, f"🎯 Profile level {new_level_partner} unlocked. Use /card to see more.")
+                    self.send(chat_id_partner, partner, f"Profile level {new_level_partner} unlocked. Use /card to see more.")
 
                 # Conversation coach nudges every 6 messages
                 if total_messages >= 6 and total_messages % 6 == 0 and chat_id_self:
