@@ -258,8 +258,10 @@ class SeriesSwarm:
         self.state.set_status(user_id, Status.ONBOARDING)
         welcome_msg = """Welcome! I help you meet someone and slowly build a profile of them based only on your chat.
 
-First, send me a short intro about yourself and what you are looking for here."""
-        self.send(chat_id, user_id, welcome_msg)
+I’m ready — please send a short intro about yourself and what you are looking for here."""
+
+        guidance = self.ai.generate_onboarding_guidance()
+        self.send(chat_id, user_id, welcome_msg + "\n\n" + guidance)
         return True
 
     def handle_onboarding(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
@@ -304,7 +306,7 @@ Anytime you want, send /help for commands."""
         
         # Send connection messages - use send() which will retrieve chat_id from stored state
         # This avoids creating new chats if chat_id wasn't passed
-        msg = "🎉 Connected! Say hi. (Type /end to disconnect, /card to see their profile)"
+        msg = "🤝 Connected! Say hi. (Type /end to disconnect, /card to see their profile)"
         
         self.send(chat_a, user_a, msg)
         self.send(chat_b, user_b, msg)
@@ -383,8 +385,8 @@ Anytime you want, send /help for commands."""
             chat2 = self.switchboard.get_chat_id(user2)
 
             # Send vCards
-            self.send(chat1, user1, "💖 Contact shared!", vcard2, "contact.vcf", "text/vcard")
-            self.send(chat2, user2, "💖 Contact shared!", vcard1, "contact.vcf", "text/vcard")
+            self.send(chat1, user1, "Contact shared!", vcard2, "contact.vcf", "text/vcard")
+            self.send(chat2, user2, "Contact shared!", vcard1, "contact.vcf", "text/vcard")
 
             logger.info(f"Exchanged contacts: {user1} <-> {user2}")
             return True

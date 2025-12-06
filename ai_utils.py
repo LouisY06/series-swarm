@@ -59,6 +59,38 @@ Format as simple bullet points, one per line starting with "-".
             logger.error(f"Error generating preview: {e}")
             # Fallback
             return f"- Based on their intro, they seem interesting.\n- They're here to meet people.\n- Start a conversation to learn more!"
+
+    def generate_onboarding_guidance(self) -> str:
+        """Generate a short, actionable prompt to guide a new user on what to send."""
+        prompt = """You are helping someone join an anonymous chat matchmaking service.
+Write 3-4 short bullet points telling them what to send as their intro.
+Keep it under 400 characters total. Be specific and actionable.
+Do not use emojis."""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'You are concise, friendly, and give clear instructions.'
+                    },
+                    {'role': 'user', 'content': prompt}
+                ],
+                temperature=0.5,
+                max_tokens=180
+            )
+            guidance = response.choices[0].message.content.strip()
+            logger.info(f"Generated onboarding guidance: {guidance[:100]}...")
+            return guidance
+        except Exception as e:
+            logger.error(f"Error generating onboarding guidance: {e}")
+            return (
+                "- Share who you are (e.g., student, role, interests)\n"
+                "- Say what you’re looking for here\n"
+                "- Add 1-2 topics you enjoy discussing\n"
+                "- Mention any boundaries (e.g., keep it casual)"
+            )
     
     def generate_profile_resume(
         self,
