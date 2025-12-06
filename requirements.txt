@@ -7,3 +7,7 @@ requests>=2.31.0
 vobject>=0.9.6
 openai>=1.0.0
 
+# Music Quiz feature (Lyrical Soulmates)
+spotipy>=2.23.0
+lyricsgenius>=3.0.0
+
