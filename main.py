@@ -124,17 +124,19 @@ class SeriesSwarm:
             if from_phone == self.sender_number:
                 return True
 
-            # HACKATHON FIX: Only process messages sent TO our number
+            # Ensure message is for our number if chat_handles are provided
             chat_handles = data.get('chat_handles', [])
-            our_number_in_chat = False
-            for handle in chat_handles:
-                if handle.get('identifier') == self.sender_number:
-                    our_number_in_chat = True
-                    break
-            
-            if not our_number_in_chat:
-                logger.warning(f"Skipping message not for our number. chat_handles={chat_handles}")
-                return True
+            if chat_handles:
+                our_number_in_chat = any(
+                    (handle or {}).get('identifier') == self.sender_number
+                    for handle in chat_handles
+                )
+                if not our_number_in_chat:
+                    logger.warning(f"Skipping message not for our number. chat_handles={chat_handles}")
+                    return True
+            else:
+                # Some events may not include chat_handles; process them
+                logger.debug("No chat_handles provided; processing message")
             
             logger.info(f"Processing message for {self.sender_number}")
 
