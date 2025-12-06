@@ -65,8 +65,8 @@ class KafkaConsumer:
             try:
                 value = json.loads(msg.value().decode('utf-8'))
             except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                logger.error(f"Failed to deserialize: {e}")
-                return None
+                logger.debug(f"Skipping non-JSON message: {e}")
+                return None  # Skip binary messages silently
 
             return {
                 'key': msg.key().decode('utf-8') if msg.key() else None,

@@ -16,8 +16,11 @@ class SeriesAPI:
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         """Initialize Series API client."""
         self.api_key = api_key
-        self.base_url = (base_url or os.getenv('SERIES_API_URL', 
-            'https://series-hackathon-service-202642739529.us-east1.run.app')).rstrip('/')
+        url = base_url or os.getenv('SERIES_API_URL', 'https://series-hackathon-service-202642739529.us-east1.run.app')
+        # Remove any comments from URL
+        if '#' in url:
+            url = url.split('#')[0].strip()
+        self.base_url = url.rstrip('/')
         self.headers = {
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json'
