@@ -476,6 +476,10 @@ Send /help for all commands."""
             self.send(chat_id, user_id, "You're not in a conversation. Send /match to meet someone.")
             return True
 
+        # Handle active quiz - treat message as a guess
+        if self.quiz_game and self.quiz_game.has_active_quiz(user_id):
+            return self.handle_quiz_guess(user_id, chat_id, text)
+
         # Handle in-chat icebreaker flow before relaying messages
         if self.state.icebreaker_active(user_id, partner):
             return self.handle_icebreakers_message(user_id, partner, chat_id, text)
