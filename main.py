@@ -355,7 +355,7 @@ First, what's your name?"""
 
         if not name:
             self.send(chat_id, user_id, "I didn't quite catch that. Try replying with just your name, e.g. 'Alana'.")
-            return True
+        return True
 
         if len(name.split()) > 4:
             self.send(chat_id, user_id, "Try just sending your name, for example: 'Alana Kwan'.")
@@ -744,6 +744,20 @@ Send /help for all commands."""
             partner_items = pair_entries.get(partner, {})
             merged = format_shared_bucketlist(me_items, partner_items)
 
+            # Persist shared bucket list on both user profiles so it survives restarts
+            try:
+                prof_me = self.switchboard.get_user_profile(user_id) or {}
+                prof_partner = self.switchboard.get_user_profile(partner) or {}
+                bucket_key = "bucketlist_with"
+                prof_me.setdefault(bucket_key, {})
+                prof_partner.setdefault(bucket_key, {})
+                prof_me[bucket_key][partner] = {"self": me_items, "partner": partner_items}
+                prof_partner[bucket_key][user_id] = {"self": partner_items, "partner": me_items}
+                self.switchboard.store_user_profile(user_id, prof_me)
+                self.switchboard.store_user_profile(partner, prof_partner)
+            except Exception as e:
+                logger.error(f"Failed to persist bucketlist for {user_id} & {partner}: {e}", exc_info=True)
+
             if chat_id:
                 self.send(chat_id, user_id, merged)
             if partner_chat:
@@ -756,7 +770,8 @@ Send /help for all commands."""
                 suggestions = self.ai.generate_bucketlist_suggestions(me_items, partner_items)
                 suggestions_text = (
                     "Here are a few things you could actually do together based on your lists:\n"
-                    f"{suggestions}"
+                    f"{suggestions}\n\n"
+                    "Reply /topspots if you want me to find top-rated real places that match these ideas."
                 )
                 if chat_id:
                     self.send(chat_id, user_id, suggestions_text)
@@ -817,7 +832,8 @@ Send /help for all commands."""
                 if partner_chat:
                     self.send(partner_chat, partner, notice)
 
-            self.state.clear_bucketlist(user_id, partner)
+            # Stop intercepting further messages for bucket list flow, but keep entries for /topspots
+            self.state.set_bucketlist_active(user_id, partner, False)
 
         return True
 
@@ -829,6 +845,26 @@ Send /help for all commands."""
             return True
 
         pair_entries = self.state.get_bucketlist_pair(phone, partner)
+        # If not in memory (e.g., after restart), try to recover from profiles
+        if not pair_entries:
+            try:
+                prof_self = self.switchboard.get_user_profile(phone) or {}
+                prof_partner = self.switchboard.get_user_profile(partner) or {}
+                bucket_key = "bucketlist_with"
+                cached = prof_self.get(bucket_key, {}).get(partner)
+                if cached:
+                    # cached has shape {"self": ..., "partner": ...} from perspective of phone
+                    self.state.set_bucketlist(phone, partner, cached.get("self", {}))
+                    self.state.set_bucketlist(partner, phone, cached.get("partner", {}))
+                    pair_entries = self.state.get_bucketlist_pair(phone, partner)
+                elif prof_partner.get(bucket_key, {}).get(phone):
+                    cached_rev = prof_partner[bucket_key][phone]
+                    self.state.set_bucketlist(phone, partner, cached_rev.get("partner", {}))
+                    self.state.set_bucketlist(partner, phone, cached_rev.get("self", {}))
+                    pair_entries = self.state.get_bucketlist_pair(phone, partner)
+            except Exception as e:
+                logger.error(f"Failed to restore bucketlist for {phone} & {partner}: {e}", exc_info=True)
+
         me_items = pair_entries.get(phone)
         partner_items = pair_entries.get(partner)
         if not me_items or not partner_items:
