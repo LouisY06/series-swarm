@@ -28,7 +28,7 @@ def parse_statements(text: str) -> List[str]:
     for ln in lines:
         if not ln:
             continue
-        num_match = re.match(r"^\\s*(\\d+)[\\).:-]?\\s*(.*)$", ln)
+        num_match = re.match(r"^\s*(\d+)[\).:-]?\s*(.*)$", ln)
         if num_match:
             # Start a new statement
             flush_current()
@@ -43,7 +43,7 @@ def parse_statements(text: str) -> List[str]:
         return statements[:3]
 
     # Fallback: simple split on separators
-    parts = re.split(r"[\\n\\r/|;,]+", text)
+    parts = re.split(r"[\n\r/|;,]+", text)
     cleaned = [normalize(p) for p in parts if p and p.strip()]
     if len(cleaned) >= 3:
         return cleaned[:3]
