@@ -46,6 +46,9 @@ class StateManager:
         # Web icebreaker sessions mapping
         self.icebreaker_sessions: Dict[Tuple[str, str], str] = {}
         self.icebreaker_session_users: Dict[str, Tuple[str, str]] = {}
+        # Bucket list state per pair
+        self.bucketlist_active: Dict[Tuple[str, str], bool] = {}
+        self.bucketlist_entries: Dict[Tuple[str, str], Dict[str, Dict[str, str]]] = {}
     
     def get_status(self, user_id: str) -> Status:
         """Get user status, defaulting to IDLE for new users."""
@@ -217,6 +220,30 @@ class StateManager:
 
     def icebreaker_active(self, a: str, b: str) -> bool:
         return self._get_ib(a, b).get("active", False)
+
+    # Bucket list helpers
+    def set_bucketlist_active(self, user_a: str, user_b: str, active: bool = True):
+        pid = self.pair_id_for(user_a, user_b)
+        self.bucketlist_active[pid] = active
+
+    def is_bucketlist_active(self, user_a: str, user_b: str) -> bool:
+        pid = self.pair_id_for(user_a, user_b)
+        return self.bucketlist_active.get(pid, False)
+
+    def set_bucketlist(self, user: str, partner: str, items: Dict[str, str]):
+        pid = self.pair_id_for(user, partner)
+        if pid not in self.bucketlist_entries:
+            self.bucketlist_entries[pid] = {}
+        self.bucketlist_entries[pid][user] = items
+
+    def get_bucketlist_pair(self, user_a: str, user_b: str) -> Dict[str, Dict[str, str]]:
+        pid = self.pair_id_for(user_a, user_b)
+        return self.bucketlist_entries.get(pid, {})
+
+    def clear_bucketlist(self, user_a: str, user_b: str):
+        pid = self.pair_id_for(user_a, user_b)
+        self.bucketlist_entries.pop(pid, None)
+        self.bucketlist_active.pop(pid, None)
 
     # Web icebreaker session helpers
     def set_icebreaker_session(self, user_a: str, user_b: str, session_id: str):

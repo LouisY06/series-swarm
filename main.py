@@ -16,6 +16,7 @@ from state import StateManager, Status
 from ai_utils import AIUtils
 from collections import defaultdict
 from icebreakers.imessage import parse_statements, format_partner_share
+from icebreakers.bucketlist import parse_bucketlist, format_shared_bucketlist, format_captured
 
 load_dotenv()
 
@@ -407,6 +408,9 @@ Send /help for all commands."""
         # Handle in-chat icebreaker flow before relaying messages
         if self.state.icebreaker_active(user_id, partner):
             return self.handle_icebreakers_message(user_id, partner, chat_id, text)
+        # Handle in-chat bucketlist flow before relaying messages
+        if self.state.is_bucketlist_active(user_id, partner):
+            return self.handle_bucketlist_message(user_id, partner, chat_id, text)
 
         # If the last message to this user was an AI prompt, skip AI follow-ups for this reply.
         skip_ai = False
@@ -614,44 +618,72 @@ Send /help for all commands."""
         return True
 
     def handle_bucketlist(self, phone: str, chat_id: Optional[int]) -> bool:
-        """Start web-based Shared Bucket List Builder and share links."""
+        """Start in-chat Shared Bucket List Builder."""
         partner = self.state.get_partner(phone)
         if not partner:
             self.send(chat_id, phone, "You need to be in a conversation first. Type /match to find someone.")
             return True
 
-        # Get or create session for this pair
-        session_id = self.state.get_icebreaker_session(phone, partner)
-        if not session_id:
-            session_id = uuid.uuid4().hex
-            self.state.set_icebreaker_session(phone, partner, session_id)
-            logger.info(f"Created bucketlist session {session_id} for {phone} and {partner}")
-        else:
-            logger.info(f"Reusing bucketlist session {session_id} for {phone} and {partner}")
+        self.state.set_bucketlist_active(phone, partner, True)
 
-        base_url = os.getenv("ICEBREAKER_BASE_URL", "https://your-game-host").rstrip("/")
-        url_self = f"{base_url}/bucketlist?session={session_id}&who=me"
-        url_partner = f"{base_url}/bucketlist?session={session_id}&who=partner"
-
-        self.send(
-            chat_id,
-            phone,
+        instructions = (
             "📝 Shared Bucket List Builder\n"
-            "Tap this link to build a bucket list together, then come back here to keep chatting:\n"
-            f"{url_self}"
+            "Send ONE message with 5 lines:\n"
+            "1) Travel\n2) Skill to learn\n3) Food experience\n4) Adventure\n5) Creative experience\n\n"
+            "You can type 'skip' on any line if you're not sure."
         )
+
+        self.send(chat_id, phone, instructions)
 
         partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
         if partner_chat:
             self.send(
                 partner_chat,
                 partner,
-                "📝 Your partner started a Shared Bucket List Builder game.\n"
-                "Tap this link to join, then come back here to keep chatting:\n"
-                f"{url_partner}"
+                "📝 Your partner started a Shared Bucket List.\n"
+                "Reply with 5 lines in one message: travel, skill, food, adventure, creative.\n"
+                "You can type 'skip' on any line."
             )
         else:
-            logger.warning(f"No chat_id for partner {partner} when starting bucketlist game.")
+            logger.warning(f"No chat_id for partner {partner} when starting in-chat bucketlist.")
+
+        return True
+
+    def handle_bucketlist_message(self, user_id: str, partner: str, chat_id: Optional[int], text: str) -> bool:
+        """Capture bucket list entries and share merged list when both respond."""
+        if not text.strip():
+            self.send(chat_id, user_id, "Please send 5 lines (travel, skill, food, adventure, creative).")
+            return True
+
+        items = parse_bucketlist(text)
+        non_empty = [v for v in items.values() if v and v.strip().lower() != "skip"]
+        if len(non_empty) < 3:
+            self.send(
+                chat_id,
+                user_id,
+                "I need at least a few items. Please send 5 lines (you can use 'skip' for any)."
+            )
+            return True
+
+        # Save/overwrite user's submission
+        self.state.set_bucketlist(user_id, partner, items)
+        self.send(chat_id, user_id, format_captured(items) + "\n\nIf that's wrong, resend all 5 lines.")
+
+        pair_entries = self.state.get_bucketlist_pair(user_id, partner)
+        if len(pair_entries) == 2:
+            partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+            me_items = pair_entries.get(user_id, {})
+            partner_items = pair_entries.get(partner, {})
+            merged = format_shared_bucketlist(me_items, partner_items)
+
+            if chat_id:
+                self.send(chat_id, user_id, merged)
+            if partner_chat:
+                self.send(partner_chat, partner, merged)
+            else:
+                logger.warning(f"Could not deliver merged bucketlist to {partner}: missing chat_id")
+
+            self.state.clear_bucketlist(user_id, partner)
 
         return True
 
