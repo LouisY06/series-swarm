@@ -39,6 +39,7 @@ class CommandHandler:
         'card': ['/card', 'card'],
         'override': ['/override'],
         'setcity': ['/setcity'],
+        'topspots': ['/topspots'],
         'icebreaker': ['/icebreaker'],
         'icebreakers': ['/icebreakers'],
         'bucketlist': ['/bucketlist'],

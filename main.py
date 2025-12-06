@@ -17,7 +17,7 @@ from ai_utils import AIUtils
 from collections import defaultdict
 from icebreakers.imessage import parse_statements, format_partner_share
 from icebreakers.bucketlist import parse_bucketlist, format_shared_bucketlist, format_captured
-from realworld.bucketlist import get_real_world_recommendations
+from realworld.bucketlist import get_real_world_recommendations, get_top_bucketlist_spots
 
 load_dotenv()
 
@@ -304,6 +304,8 @@ class SeriesSwarm:
             return self.handle_icebreakers(phone, chat_id)
         elif cmd == 'bucketlist':
             return self.handle_bucketlist(phone, chat_id)
+        elif cmd == 'topspots':
+            return self.handle_topspots(phone, chat_id)
 
         else:
             response = self.commands.execute_command(self.switchboard, phone, cmd, arg)
@@ -750,6 +752,11 @@ Send /help for all commands."""
                             if url:
                                 line += f" — {url}"
                             lines.append(line)
+                        lines += [
+                            "",
+                            "Reply /topspots if you want one top-rated place per idea,",
+                            "with rating and why it fits your bucket list."
+                        ]
                         real_text = "\n".join(lines)
                         if chat_id:
                             self.send(chat_id, user_id, real_text)
@@ -778,6 +785,72 @@ Send /help for all commands."""
                     self.send(partner_chat, partner, notice)
 
             self.state.clear_bucketlist(user_id, partner)
+
+        return True
+
+    def handle_topspots(self, phone: str, chat_id: Optional[int]) -> bool:
+        """Provide top-rated places per bucketlist theme on demand."""
+        partner = self.state.get_partner(phone)
+        if not partner:
+            self.send(chat_id, phone, "You need to be in a conversation first.")
+            return True
+
+        pair_entries = self.state.get_bucketlist_pair(phone, partner)
+        me_items = pair_entries.get(phone)
+        partner_items = pair_entries.get(partner)
+        if not me_items or not partner_items:
+            self.send(chat_id, phone, "I don't have a shared bucket list for you two yet. Try /bucketlist first.")
+            return True
+
+        profile_self = self.switchboard.get_user_profile(phone)
+        profile_partner = self.switchboard.get_user_profile(partner)
+        city = (profile_self.get("city") or profile_partner.get("city") or "").strip()
+        if not city:
+            self.send(chat_id, phone, "Set your city first so I can find real places. Use /setcity <city>.")
+            return True
+
+        try:
+            tops = get_top_bucketlist_spots(me_items, partner_items, city)
+        except Exception as e:
+            logger.error(f"Error computing top spots for {phone}: {e}", exc_info=True)
+            self.send(chat_id, phone, "I had trouble finding specific places just now.")
+            return True
+
+        if not tops:
+            self.send(chat_id, phone, f"I couldn't find good top-rated matches in {city} right now.")
+            return True
+
+        lines = [f"🎯 Top picks for your shared bucket list in {city}:"]
+        for spot in tops:
+            label = spot.get("label", "Idea")
+            name = spot.get("name", "")
+            addr = spot.get("address", "")
+            rating = spot.get("rating", 0)
+            url = spot.get("url", "")
+            reason = spot.get("reason", "")
+
+            lines.append("")
+            lines.append(f"• {label}:")
+            core = f"  {name}"
+            if rating:
+                core += f" ({rating:.1f}★)"
+            lines.append(core)
+            if addr:
+                lines.append(f"  {addr}")
+            if reason:
+                lines.append(f"  {reason}")
+            if url:
+                lines.append(f"  {url}")
+
+        msg = "\n".join(lines)
+
+        chat_self = chat_id or self.state.get_chat_id(phone) or self.switchboard.get_chat_id(phone)
+        chat_partner = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+
+        if chat_self:
+            self.send(chat_self, phone, msg)
+        if chat_partner:
+            self.send(chat_partner, partner, msg)
 
         return True
 
