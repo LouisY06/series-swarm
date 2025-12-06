@@ -370,7 +370,7 @@ First, what's your name?"""
 
         if not name:
             self.send(chat_id, user_id, "I didn't quite catch that. Try replying with just your name, e.g. 'Alana'.")
-        return True
+            return True
 
         if len(name.split()) > 4:
             self.send(chat_id, user_id, "Try just sending your name, for example: 'Alana Kwan'.")
