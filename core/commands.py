@@ -40,6 +40,8 @@ class CommandHandler:
         'override': ['/override'],
         'setcity': ['/setcity'],
         'topspots': ['/topspots'],
+        'cityyes': ['/cityyes'],
+        'cityno': ['/cityno'],
         'icebreaker': ['/icebreaker'],
         'icebreakers': ['/icebreakers'],
         'bucketlist': ['/bucketlist'],

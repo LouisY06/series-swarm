@@ -291,13 +291,11 @@ class SeriesSwarm:
             self.send(chat_id, phone, "I don't recognize that command. Type /help for a list of commands.")
             return True
         elif cmd == 'setcity':
-            if not arg:
-                self.send(chat_id, phone, "Usage: /setcity <city>")
-                return True
-            city = arg.strip()
-            self.switchboard.store_user_profile(phone, {"city": city})
-            self.send(chat_id, phone, f"City set to: {city}")
-            return True
+            return self.handle_setcity(phone, chat_id, arg)
+        elif cmd == 'cityyes':
+            return self.handle_city_confirm(phone, chat_id, approved=True)
+        elif cmd == 'cityno':
+            return self.handle_city_confirm(phone, chat_id, approved=False)
         elif cmd == 'icebreaker':
             return self.handle_icebreaker(phone, chat_id)
         elif cmd == 'icebreakers':
@@ -852,6 +850,67 @@ Send /help for all commands."""
         if chat_partner:
             self.send(chat_partner, partner, msg)
 
+        return True
+
+    def handle_setcity(self, phone: str, chat_id: Optional[int], arg: Optional[str]) -> bool:
+        """Set city; if paired, request partner confirmation."""
+        if not arg or not arg.strip():
+            self.send(chat_id, phone, "Usage: /setcity <city>")
+            return True
+        city = arg.strip()
+        partner = self.state.get_partner(phone)
+        if not partner:
+            # Not paired; set directly
+            self.switchboard.store_user_profile(phone, {"city": city})
+            self.send(chat_id, phone, f"City set to: {city}")
+            return True
+
+        # Paired: request confirmation from partner
+        self.state.set_pending_city(phone, partner, city, set_by=phone)
+        self.send(chat_id, phone, f"Requested city set to: {city}. Waiting for your partner to confirm (/cityyes or /cityno).")
+        partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+        if partner_chat:
+            self.send(
+                partner_chat,
+                partner,
+                f"Your partner wants to set the city to: {city}. Reply /cityyes to accept or /cityno to decline."
+            )
+        return True
+
+    def handle_city_confirm(self, phone: str, chat_id: Optional[int], approved: bool) -> bool:
+        """Handle /cityyes or /cityno from partner."""
+        partner = self.state.get_partner(phone)
+        if not partner:
+            self.send(chat_id, phone, "You need to be in a conversation first.")
+            return True
+        pending = self.state.get_pending_city(phone, partner)
+        if not pending:
+            self.send(chat_id, phone, "No city change pending.")
+            return True
+
+        city = pending.get("city", "")
+        set_by = pending.get("set_by", "")
+        partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+
+        if approved:
+            # Apply city to both users
+            self.switchboard.store_user_profile(phone, {"city": city})
+            self.switchboard.store_user_profile(partner, {"city": city})
+            self.state.clear_pending_city(phone, partner)
+            msg_self = f"City set to: {city} (confirmed)."
+            msg_partner = f"City set to: {city} (you confirmed)."
+            if chat_id:
+                self.send(chat_id, phone, msg_self)
+            if partner_chat:
+                self.send(partner_chat, partner, msg_partner)
+        else:
+            self.state.clear_pending_city(phone, partner)
+            decline_self = "City change declined. You can propose another with /setcity <city>."
+            decline_partner = "City change declined. Propose another city with /setcity <city>."
+            if chat_id:
+                self.send(chat_id, phone, decline_self)
+            if partner_chat:
+                self.send(partner_chat, partner, decline_partner)
         return True
 
     def handle_card(self, user_id: str, chat_id: Optional[int]) -> bool:
