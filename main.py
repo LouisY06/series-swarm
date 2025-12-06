@@ -7,6 +7,7 @@ import signal
 import threading
 import time
 import uuid
+import urllib.parse
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
@@ -330,6 +331,8 @@ class SeriesSwarm:
             return self.handle_quiz(phone, chat_id, arg)
         elif cmd == 'topspots':
             return self.handle_topspots(phone, chat_id)
+        elif cmd == 'spotify':
+            return self.handle_spotify(phone, chat_id)
 
         else:
             response = self.commands.execute_command(self.switchboard, phone, cmd, arg)
@@ -882,6 +885,49 @@ Send /help for all commands."""
         if chat_partner:
             self.send(chat_partner, partner, msg)
 
+        return True
+
+    def _build_spotify_auth_url(self, state: str) -> Optional[str]:
+        client_id = os.getenv("SPOTIPY_CLIENT_ID")
+        redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI")
+        scope = "user-read-private user-read-email"
+        if not client_id or not redirect_uri:
+            return None
+        params = {
+            "client_id": client_id,
+            "response_type": "code",
+            "redirect_uri": redirect_uri,
+            "scope": scope,
+            "state": state,
+        }
+        return "https://accounts.spotify.com/authorize?" + urllib.parse.urlencode(params)
+
+    def handle_spotify(self, phone: str, chat_id: Optional[int]) -> bool:
+        """Send a Spotify auth link for the user to connect their account."""
+        client_id = os.getenv("SPOTIPY_CLIENT_ID")
+        redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI")
+        if not client_id or not redirect_uri:
+            self.send(chat_id, phone, "Spotify is not configured yet. Set SPOTIPY_CLIENT_ID and SPOTIPY_REDIRECT_URI.")
+            return True
+
+        state = uuid.uuid4().hex
+        url = self._build_spotify_auth_url(state)
+        if not url:
+            self.send(chat_id, phone, "I couldn't generate a Spotify auth link. Please try again later.")
+            return True
+
+        # Store state on the profile for later validation
+        profile = self.switchboard.get_user_profile(phone)
+        profile["spotify_state"] = state
+        self.switchboard.store_user_profile(phone, profile)
+
+        self.send(
+            chat_id,
+            phone,
+            "Connect your Spotify account:\n"
+            f"{url}\n\n"
+            "After you approve, I'll link your account here."
+        )
         return True
 
     def handle_setcity(self, phone: str, chat_id: Optional[int], arg: Optional[str]) -> bool:
