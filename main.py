@@ -247,6 +247,9 @@ class SeriesSwarm:
                     self.send(partner_chat, partner, "👀 Partner wants to share contact! Type /reveal to accept.")
             return True
 
+        elif cmd == 'we':
+            return self.handle_we(phone, chat_id)
+
         else:
             response = self.commands.execute_command(self.switchboard, phone, cmd, arg)
             if response:
@@ -333,18 +336,40 @@ Anytime you want, send /help for commands."""
             return False
         
         # Kick off profile update in the background so it doesn't block sending
-        def _update_profiles_async():
+        def _update_profiles_async(chat_id_self: Optional[int], chat_id_partner: Optional[int]):
             try:
                 total_messages = self.state.get_message_count(user_id, partner)
-                self.ai.ensure_profile_updated(self.state, user_id, partner, total_messages)
-                self.ai.ensure_profile_updated(self.state, partner, user_id, total_messages)
+                new_level_self, old_level_self, changed_self = self.ai.ensure_profile_updated(
+                    self.state, user_id, partner, total_messages
+                )
+                new_level_partner, old_level_partner, changed_partner = self.ai.ensure_profile_updated(
+                    self.state, partner, user_id, total_messages
+                )
+
+                if changed_self and chat_id_self:
+                    self.send(chat_id_self, user_id, f"🎯 Profile level {new_level_self} unlocked. Use /card to see more.")
+                if changed_partner and chat_id_partner:
+                    self.send(chat_id_partner, partner, f"🎯 Profile level {new_level_partner} unlocked. Use /card to see more.")
+
                 logger.info(f"Async profile update done for {user_id} <-> {partner} (total {total_messages})")
             except Exception as e:
                 logger.error(f"Async profile update error: {e}", exc_info=True)
         
-        threading.Thread(target=_update_profiles_async, daemon=True).start()
+        threading.Thread(target=_update_profiles_async, args=(chat_id, partner_chat), daemon=True).start()
         
         logger.info(f"Relayed message from {user_id} to {partner} in {time.time() - start_ts:.3f}s")
+        return True
+
+    def handle_we(self, user_id: str, chat_id: Optional[int]) -> bool:
+        """Handle /we command - show shared profile of the conversation."""
+        partner = self.state.get_partner(user_id)
+        if not partner:
+            self.send(chat_id, user_id, "You are not in a conversation. Send /match to meet someone.")
+            return True
+
+        conversation = self.state.get_conversation(user_id, partner)
+        summary = self.ai.generate_shared_profile(conversation)
+        self.send(chat_id, user_id, "Here's what I notice about the two of you:\n\n" + summary)
         return True
 
     def handle_card(self, user_id: str, chat_id: Optional[int]) -> bool:

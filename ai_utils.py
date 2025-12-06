@@ -186,14 +186,15 @@ Format as bullet points, one per line starting with "-".
         other_id: str,
         total_messages: int
     ):
-        """Ensure profile is updated if needed."""
+        """Ensure profile is updated if needed. Returns (new_level, old_level, changed)."""
         viewer_profile = state_manager.get_profile(viewer_id, other_id)
+        old_level = viewer_profile["level"]
         new_level = self.level_for_message_count(total_messages)
         
         # Avoid calling LLM too often
         if (new_level == viewer_profile["level"] and 
             total_messages - viewer_profile["last_message_count"] < 5):
-            return
+            return new_level, old_level, False
         
         # Get conversation
         conversation = state_manager.get_conversation(viewer_id, other_id)
@@ -214,4 +215,44 @@ Format as bullet points, one per line starting with "-".
         
         state_manager.set_profile(viewer_id, other_id, viewer_profile)
         logger.info(f"Updated profile for {viewer_id} viewing {other_id}: level {new_level}")
+        return new_level, old_level, new_level != old_level
+
+    def generate_shared_profile(self, conversation) -> str:
+        """Generate a shared 'we-profile' based on the conversation."""
+        conv_text = "\n".join([
+            f"{msg['from']}: {msg['text']}"
+            for msg in conversation[-50:]
+        ])
+
+        prompt = f"""You are summarizing the shared dynamics between two anonymous people based only on their conversation.
+
+Conversation:
+{conv_text}
+
+Write 3-5 bullet points about their shared themes, rapport, and style. 
+Be specific, avoid inventing facts, no emojis. Under 400 characters."""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'You describe the relationship dynamics between two people succinctly and accurately.'
+                    },
+                    {'role': 'user', 'content': prompt}
+                ],
+                temperature=0.5,
+                max_tokens=220
+            )
+            summary = response.choices[0].message.content.strip()
+            logger.info(f"Generated shared profile: {summary[:100]}...")
+            return summary
+        except Exception as e:
+            logger.error(f"Error generating shared profile: {e}")
+            return (
+                "- You have some shared interests.\n"
+                "- The tone feels friendly and open.\n"
+                "- Keep exploring topics you both enjoy."
+            )
 

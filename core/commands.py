@@ -18,6 +18,7 @@ class CommandHandler:
         'setphone': ['/setphone'],
         'profile': ['/profile', 'profile'],
         'help': ['/help', 'help', '?'],
+        'we': ['/we', 'we'],
     }
 
     @staticmethod
