@@ -888,8 +888,8 @@ Send /help for all commands."""
         return True
 
     def _build_spotify_auth_url(self, state: str) -> Optional[str]:
-        client_id = os.getenv("SPOTIPY_CLIENT_ID")
-        redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI")
+        client_id = os.getenv("SPOTIFY_CLIENT_ID")
+        redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI")
         scope = "user-read-private user-read-email"
         if not client_id or not redirect_uri:
             return None
