@@ -4,6 +4,8 @@ import os
 import sys
 import logging
 import signal
+import threading
+import time
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
@@ -107,7 +109,7 @@ class SeriesSwarm:
             event_type = value.get('event_type')
             logger.debug(f"Received event type: {event_type}, full message: {message}")
             if event_type != 'message.received':
-                logger.debug(f"Skipping non-message event: {event_type}")
+                logger.warning(f"Skipping non-message event: {event_type}, value keys: {list(value.keys())}")
                 return True
 
             text = data.get('text', '').strip()
@@ -131,7 +133,7 @@ class SeriesSwarm:
                     break
             
             if not our_number_in_chat:
-                logger.debug(f"Skipping message not for our number")
+                logger.warning(f"Skipping message not for our number. chat_handles={chat_handles}")
                 return True
             
             logger.info(f"Processing message for {self.sender_number}")
@@ -275,7 +277,21 @@ Anytime you want, send /help for commands."""
         """Match two users."""
         logger.info(f"Matching {user_a} with {user_b}")
         
-        # Set partners and status
+        chat_a = self.state.get_chat_id(user_a) or self.switchboard.get_chat_id(user_a)
+        chat_b = self.state.get_chat_id(user_b) or self.switchboard.get_chat_id(user_b)
+        
+        # Do not enter chatting state without valid chat_ids for both users
+        if chat_a is None or chat_b is None:
+            logger.error(f"Cannot match {user_a} and {user_b}: missing chat_id(s) (chat_a={chat_a}, chat_b={chat_b})")
+            self.state.set_status(user_a, Status.READY)
+            self.state.set_status(user_b, Status.READY)
+            if chat_a:
+                self.send(chat_a, user_a, "⚠️ I had trouble connecting your chat. Try sending /match again.")
+            if chat_b:
+                self.send(chat_b, user_b, "⚠️ I had trouble connecting your chat. Try sending /match again.")
+            return
+        
+        # Set partners and status now that chat_ids are confirmed
         self.state.set_partner(user_a, user_b)
         self.state.set_status(user_a, Status.CHATTING)
         self.state.set_status(user_b, Status.CHATTING)
@@ -288,23 +304,13 @@ Anytime you want, send /help for commands."""
         # This avoids creating new chats if chat_id wasn't passed
         msg = "🎉 Connected! Say hi. (Type /end to disconnect, /card to see their profile)"
         
-        # Get chat_ids but let send() handle retrieval if None
-        chat_a = self.state.get_chat_id(user_a) or self.switchboard.get_chat_id(user_a)
-        chat_b = self.state.get_chat_id(user_b) or self.switchboard.get_chat_id(user_b)
-        
-        if chat_a is None:
-            logger.warning(f"No chat_id stored for {user_a} - will create new chat if send() can't find it")
-        if chat_b is None:
-            logger.warning(f"No chat_id stored for {user_b} - will create new chat if send() can't find it")
-        
-        # send() will try to retrieve chat_id from state if None, but if still None, it creates a new chat
-        # This is the problem - we should require chat_id before matching
         self.send(chat_a, user_a, msg)
         self.send(chat_b, user_b, msg)
         logger.info(f"Matched {user_a} with {user_b}")
 
     def handle_chat_message(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
         """Handle a chat message between matched users."""
+        start_ts = time.time()
         partner = self.state.get_partner(user_id)
         if not partner:
             self.state.set_status(user_id, Status.READY)
@@ -314,12 +320,7 @@ Anytime you want, send /help for commands."""
         # Record message
         self.state.record_message(user_id, partner, text)
         
-        # Update profiles if needed
-        total_messages = self.state.get_message_count(user_id, partner)
-        self.ai.ensure_profile_updated(self.state, user_id, partner, total_messages)
-        self.ai.ensure_profile_updated(self.state, partner, user_id, total_messages)
-        
-        # Forward to partner
+        # Forward to partner ASAP
         partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
         if partner_chat:
             self.send(partner_chat, partner, text)
@@ -327,7 +328,19 @@ Anytime you want, send /help for commands."""
             logger.error(f"Cannot relay message to {partner}: chat_id not found")
             return False
         
-        logger.info(f"Relayed message from {user_id} to {partner} (total: {total_messages})")
+        # Kick off profile update in the background so it doesn't block sending
+        def _update_profiles_async():
+            try:
+                total_messages = self.state.get_message_count(user_id, partner)
+                self.ai.ensure_profile_updated(self.state, user_id, partner, total_messages)
+                self.ai.ensure_profile_updated(self.state, partner, user_id, total_messages)
+                logger.info(f"Async profile update done for {user_id} <-> {partner} (total {total_messages})")
+            except Exception as e:
+                logger.error(f"Async profile update error: {e}", exc_info=True)
+        
+        threading.Thread(target=_update_profiles_async, daemon=True).start()
+        
+        logger.info(f"Relayed message from {user_id} to {partner} in {time.time() - start_ts:.3f}s")
         return True
 
     def handle_card(self, user_id: str, chat_id: Optional[int]) -> bool:
@@ -390,7 +403,7 @@ Anytime you want, send /help for commands."""
         try:
             poll_count = 0
             while self.running:
-                message = self.consumer.consume(timeout=1.0)
+                message = self.consumer.consume(timeout=0.1)
                 poll_count += 1
                 if poll_count % 60 == 0:  # Log every 60 seconds
                     logger.info(f"Still polling... (poll #{poll_count})")
