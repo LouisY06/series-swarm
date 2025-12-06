@@ -325,10 +325,13 @@ First, what's your name?"""
         """Handle name input during onboarding."""
         def clean_name(raw: str) -> str:
             t = raw.strip()
+            # Normalize curly apostrophes
+            t = t.replace("’", "'").replace("`", "'")
             # Strip common leading "I'm/Im/I am"
-            t = re.sub(r"^(i\\s*'?m|i\\s+am)\\s+", "", t, flags=re.IGNORECASE)
+            t = re.sub(r"^(i\s*'?m|i\s+am)\s+", "", t, flags=re.IGNORECASE)
             # Remove non-letter characters except space, hyphen, apostrophe
-            t = re.sub(r"[^A-Za-z\\s'\\-]", "", t)
+            t = re.sub(r"[^A-Za-z\s'\-]", "", t)
+            # Collapse multiple spaces
             t = " ".join(t.split())
             return t
 
