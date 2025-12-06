@@ -7,11 +7,11 @@ import signal
 import threading
 import time
 import uuid
-import re
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
 from core import KafkaConsumer, KafkaProducer, SeriesAPI, Switchboard, CommandHandler
+from core.commands import normalize_name_input
 from agents import generate_vcard
 from state import StateManager, Status
 from ai_utils import AIUtils
@@ -323,20 +323,17 @@ First, what's your name?"""
 
     def handle_onboarding_name(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
         """Handle name input during onboarding."""
-        def clean_name(raw: str) -> str:
-            t = raw.strip()
-            # Normalize curly apostrophes
-            t = t.replace("’", "'").replace("`", "'")
-            # Strip common leading "I'm/Im/I am"
-            t = re.sub(r"^(i\s*'?m|i\s+am)\s+", "", t, flags=re.IGNORECASE)
-            # Remove non-letter characters except space, hyphen, apostrophe
-            t = re.sub(r"[^A-Za-z\s'\-]", "", t)
-            # Collapse multiple spaces
-            t = " ".join(t.split())
-            return t
+        name = normalize_name_input(text)
 
-        name = clean_name(text)
-        if not name or len(name) > 50 or any(ch.isdigit() for ch in name) or len(name.split()) > 4:
+        if not name:
+            self.send(chat_id, user_id, "I didn't quite catch that. Try replying with just your name, e.g. 'Alana'.")
+            return True
+
+        if len(name.split()) > 4:
+            self.send(chat_id, user_id, "Try just sending your name, for example: 'Alana Kwan'.")
+            return True
+
+        if len(name) > 50:
             self.send(chat_id, user_id, "Please enter a short name using letters only (e.g., Alana or Alana Smith).")
             return True
         

@@ -1,6 +1,7 @@
 """Command handler for SeriesSwarm."""
 
 import logging
+import re
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,60 @@ def looks_like_bad_name(arg: str) -> bool:
     if len(t) > 60:
         return True
     return False
+
+
+def normalize_name_input(raw: str) -> str:
+    """
+    Normalize free-form name text into a clean name string.
+
+    Examples:
+      "I'm Alana"      -> "Alana"
+      "My name is alana kwan!!!" -> "Alana Kwan"
+    """
+    if not raw:
+        return ""
+
+    t = raw.strip()
+
+    # Tokenize and strip trivial punctuation per token
+    tokens = t.split()
+    lower_tokens = [tok.lower().strip(",.!?") for tok in tokens]
+
+    # Heuristics to skip leading phrases like "I'm", "I am", "My name is"
+    idx = 0
+    if len(tokens) >= 2:
+        # "I'm Alana" / "Im Alana" / "I’m Alana"
+        if lower_tokens[0] in ("i", "im", "i'm", "i’m", "iam"):
+            if len(tokens) >= 3 and lower_tokens[1] == "am":
+                # "I am Alana"
+                idx = 2
+            else:
+                idx = 1
+        # "My name is Alana"
+        elif len(tokens) >= 3 and lower_tokens[0] == "my" and lower_tokens[1] == "name" and lower_tokens[2] == "is":
+            idx = 3
+        # "Name is Alana"
+        elif len(tokens) >= 2 and lower_tokens[0] == "name" and lower_tokens[1] in ("is", ":"):
+            idx = 2
+        # "This is Alana"
+        elif len(tokens) >= 2 and lower_tokens[0] == "this" and lower_tokens[1] == "is":
+            idx = 2
+        # "It's Alana" / "Its Alana"
+        elif len(tokens) >= 2 and lower_tokens[0] in ("it's", "its"):
+            idx = 2
+
+    # Take remaining tokens as the name; if we stripped everything, fall back to original
+    name_tokens = tokens[idx:] or tokens
+
+    # Join and keep only letters, spaces, hyphens, apostrophes
+    name = " ".join(name_tokens)
+    name = re.sub(r"[^A-Za-z'\- ]+", "", name)
+    name = re.sub(r"\s+", " ", name).strip()
+
+    # Title-case each word ("alana kwan" -> "Alana Kwan")
+    name = " ".join(part.capitalize() for part in name.split())
+
+    return name
 
 
 class CommandHandler:
@@ -78,10 +133,18 @@ class CommandHandler:
         """Handle /setname command."""
         if not arg:
             return "Usage: /setname <your name>"
-        if looks_like_bad_name(arg):
-            return "That doesn't look like a name. Try `/setname Firstname Lastname`."
-        switchboard.store_user_profile(user_phone, {'name': arg})
-        return f"Name set to: {arg}"
+
+        # Normalize free-form input into a reasonable name string
+        candidate = normalize_name_input(arg)
+
+        if not candidate or len(candidate) < 2:
+            return (
+                "That doesn't look like a name. "
+                "Try `/setname Firstname Lastname` or just `/setname Firstname`."
+            )
+
+        switchboard.store_user_profile(user_phone, {'name': candidate})
+        return f"Name set to: {candidate}"
 
     @staticmethod
     def handle_setemail(switchboard, user_phone: str, arg: str) -> str:
