@@ -7,6 +7,7 @@ import signal
 import threading
 import time
 import uuid
+import re
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
@@ -322,12 +323,18 @@ First, what's your name?"""
 
     def handle_onboarding_name(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
         """Handle name input during onboarding."""
-        name = text.strip()
-        if name.startswith('/'):
-            self.send(chat_id, user_id, "That looks like a command. Please enter your name without '/'.")
-            return True
-        if len(name) < 1 or len(name) > 50:
-            self.send(chat_id, user_id, "Please enter a valid name (1-50 characters).")
+        def clean_name(raw: str) -> str:
+            t = raw.strip()
+            # Strip common leading "I'm/Im/I am"
+            t = re.sub(r"^(i\\s*'?m|i\\s+am)\\s+", "", t, flags=re.IGNORECASE)
+            # Remove non-letter characters except space, hyphen, apostrophe
+            t = re.sub(r"[^A-Za-z\\s'\\-]", "", t)
+            t = " ".join(t.split())
+            return t
+
+        name = clean_name(text)
+        if not name or len(name) > 50 or any(ch.isdigit() for ch in name) or len(name.split()) > 4:
+            self.send(chat_id, user_id, "Please enter a short name using letters only (e.g., Alana or Alana Smith).")
             return True
         
         # Store name in profile
