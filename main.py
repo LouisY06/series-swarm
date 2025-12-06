@@ -287,6 +287,9 @@ class SeriesSwarm:
             self.state.set_status(phone, Status.READY)
             self.send(chat_id, phone, "Setup skipped (testing).")
             return True
+        elif cmd == 'unknown':
+            self.send(chat_id, phone, "I don't recognize that command. Type /help for a list of commands.")
+            return True
         elif cmd == 'setcity':
             if not arg:
                 self.send(chat_id, phone, "Usage: /setcity <city>")
@@ -320,6 +323,9 @@ First, what's your name?"""
     def handle_onboarding_name(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
         """Handle name input during onboarding."""
         name = text.strip()
+        if name.startswith('/'):
+            self.send(chat_id, user_id, "That looks like a command. Please enter your name without '/'.")
+            return True
         if len(name) < 1 or len(name) > 50:
             self.send(chat_id, user_id, "Please enter a valid name (1-50 characters).")
             return True
@@ -349,6 +355,13 @@ First, what's your name?"""
 
     def handle_onboarding_intro(self, user_id: str, chat_id: Optional[int], text: str) -> bool:
         """Handle intro input during onboarding."""
+        if text.strip().startswith('/'):
+            self.send(
+                chat_id,
+                user_id,
+                "That looks like a command. For your intro, send a short blurb about yourself without '/'."
+            )
+            return True
         # Store intro
         self.state.set_intro(user_id, text)
         self.state.set_status(user_id, Status.READY)
@@ -735,6 +748,14 @@ Send /help for all commands."""
                     logger.error(f"Real-world bucketlist recs error: {e}", exc_info=True)
             else:
                 logger.info("No city set for pair; skipping real-world bucketlist recommendations.")
+                notice = (
+                    "To get real place recs, set a city with /setcity <City>. "
+                    "Real-places step runs only when at least one profile has a city."
+                )
+                if chat_id:
+                    self.send(chat_id, user_id, notice)
+                if partner_chat:
+                    self.send(partner_chat, partner, notice)
 
             self.state.clear_bucketlist(user_id, partner)
 

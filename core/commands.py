@@ -6,6 +6,21 @@ from typing import Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+def looks_like_bad_name(arg: str) -> bool:
+    t = arg.strip()
+    if not t:
+        return True
+    if t.startswith('/'):
+        return True
+    if '@' in t:
+        return True
+    if any(ch.isdigit() for ch in t):
+        return True
+    if len(t) > 60:
+        return True
+    return False
+
+
 class CommandHandler:
     """Handles user commands."""
 
@@ -49,6 +64,10 @@ class CommandHandler:
                     arg = text[len(pattern):].strip()
                     return (cmd_name, arg) if arg else (cmd_name, None)
 
+        # If it looks like a command but didn't match, mark as unknown
+        if text_lower.startswith('/'):
+            return ('unknown', None)
+
         return None
 
     @staticmethod
@@ -56,6 +75,8 @@ class CommandHandler:
         """Handle /setname command."""
         if not arg:
             return "Usage: /setname <your name>"
+        if looks_like_bad_name(arg):
+            return "That doesn't look like a name. Try `/setname Firstname Lastname`."
         switchboard.store_user_profile(user_phone, {'name': arg})
         return f"Name set to: {arg}"
 
