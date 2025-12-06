@@ -32,8 +32,8 @@ class KafkaConsumer:
         config = {
             'bootstrap.servers': broker,
             'group.id': group_id,
-            'auto.offset.reset': 'earliest',
-            'enable.auto.commit': True,
+            'auto.offset.reset': 'earliest',  # Changed back to 'earliest' to see all messages
+            'enable.auto.commit': False,  # Disable auto-commit to manually control offset
         }
 
         # Add client ID if provided
