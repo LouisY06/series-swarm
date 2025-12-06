@@ -213,6 +213,19 @@ Return ONLY JSON. No extra text.
                 max_tokens=300
             )
             content = response.choices[0].message.content.strip()
+            # Strip markdown code blocks if present
+            if content.startswith("```"):
+                # Remove ```json or ``` and closing ```
+                lines = content.split("\n")
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                content = "\n".join(lines).strip()
+            
+            if not content:
+                raise ValueError("Empty response from OpenAI")
+            
             import json
             themes = json.loads(content)
             # Basic validation

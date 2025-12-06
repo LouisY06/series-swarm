@@ -145,18 +145,24 @@ class QuizGame:
         return SequenceMatcher(None, a.lower(), b.lower()).ratio()
     
     def check_answer(self, user: str, guess: str) -> Tuple[bool, str, Optional[QuizState]]:
-        """Check if user's guess is correct."""
+        """Check if user's guess is correct. Returns (is_correct, message, quiz)."""
         quiz = self.get_active_quiz(user)
         if not quiz:
             return False, "No active quiz found.", None
+        
+        guess_clean = guess.strip().lower()
+        
+        # Check for give up / idk
+        if guess_clean in ('idk', "i don't know", "i dont know", "give up", "giveup", "skip"):
+            quiz.winner = "nobody"  # Mark as ended without winner
+            logger.info(f"Quiz given up by {user}, answer was '{quiz.song_name}'")
+            return True, f"The song was '{quiz.song_name}' by {quiz.artist}. This song is in BOTH of your top 50!", quiz
         
         # Record the guess
         if user not in quiz.guesses:
             quiz.guesses[user] = []
         quiz.guesses[user].append(guess)
         
-        # Fuzzy match against song title
-        guess_clean = guess.strip().lower()
         song_clean = quiz.song_name.lower()
         
         # Check for exact match or high similarity
@@ -172,7 +178,7 @@ class QuizGame:
             logger.info(f"Quiz won by {user}: guessed '{guess}' for '{quiz.song_name}'")
             return True, f"Correct! The song is '{quiz.song_name}' by {quiz.artist}. This song is in BOTH of your top 50!", quiz
         else:
-            return False, "Wrong! Try again.", quiz
+            return False, "Wrong! Try again. (Type 'idk' to give up)", quiz
     
     def end_quiz(self, user: str) -> bool:
         """End an active quiz for a user."""

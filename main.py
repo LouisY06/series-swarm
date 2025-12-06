@@ -1236,12 +1236,20 @@ Send /help for all commands."""
             partner = quiz.user_a if quiz.user_b == phone else quiz.user_b
             partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
             
-            winner_msg = f"You got it! {message}"
-            loser_msg = f"Your partner guessed it! The song was '{quiz.song_name}' by {quiz.artist}."
-            
-            self.send(chat_id, phone, winner_msg)
-            if partner_chat:
-                self.send(partner_chat, partner, loser_msg)
+            if quiz.winner == "nobody":
+                # Someone gave up - reveal to both
+                reveal_msg = f"Quiz ended! {message}"
+                self.send(chat_id, phone, reveal_msg)
+                if partner_chat:
+                    self.send(partner_chat, partner, reveal_msg)
+            else:
+                # Someone won
+                winner_msg = f"You got it! {message}"
+                loser_msg = f"Your partner guessed it! The song was '{quiz.song_name}' by {quiz.artist}."
+                
+                self.send(chat_id, phone, winner_msg)
+                if partner_chat:
+                    self.send(partner_chat, partner, loser_msg)
             
             # End the quiz
             self.quiz_game.end_quiz(phone)
