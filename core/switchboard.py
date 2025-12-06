@@ -6,33 +6,6 @@ from typing import Optional, Dict, List, Set, Tuple
 logger = logging.getLogger(__name__)
 
 
-def _is_fake_test_data(value: str) -> bool:
-    """Check if a value looks like fake/test data."""
-    if not value:
-        return False
-    
-    value_lower = value.lower().strip()
-    
-    # Common fake/test patterns
-    fake_patterns = [
-        'john appleseed',
-        'john apple',
-        'appleseed',
-        'example.com',
-        'test@',
-        'fake@',
-        'dummy',
-        'test user',
-        'sample',
-    ]
-    
-    for pattern in fake_patterns:
-        if pattern in value_lower:
-            return True
-    
-    return False
-
-
 class Switchboard:
     """Manages user pairing, message relay, and contact reveal."""
 
@@ -133,34 +106,16 @@ class Switchboard:
         return self.user_chat_ids.get(phone)
 
     def store_user_profile(self, phone: str, data: Dict[str, str]):
-        """Store/update user profile. Rejects fake/test data."""
+        """Store/update user profile."""
         if phone not in self.user_profiles:
             self.user_profiles[phone] = {'phone': phone}
-        
-        # Filter out fake/test data
-        filtered_data = {}
-        for key, value in data.items():
-            if value and not _is_fake_test_data(str(value)):
-                filtered_data[key] = value
-            elif value:
-                logger.warning(f"Rejected fake/test data for {phone}: {key}={value[:50]}")
-        
-        self.user_profiles[phone].update(filtered_data)
+        self.user_profiles[phone].update(data)
         logger.info(f"Updated profile for {phone}")
 
     def get_user_profile(self, phone: str) -> Dict[str, str]:
-        """Get user profile. Returns only real data, filters out fake/test data."""
+        """Get user profile."""
         profile = self.user_profiles.get(phone, {})
         if 'phone' not in profile:
             profile['phone'] = phone
-        
-        # Filter out any fake/test data that might have been stored
-        filtered_profile = {'phone': profile.get('phone', phone)}
-        for key, value in profile.items():
-            if key == 'phone':
-                continue
-            if value and not _is_fake_test_data(str(value)):
-                filtered_profile[key] = value
-        
-        return filtered_profile
+        return profile
 
