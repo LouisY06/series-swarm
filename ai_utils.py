@@ -114,6 +114,15 @@ Do not use emojis."""
         me_text = _fmt(me_items)
         partner_text = _fmt(partner_items)
 
+        def _strip_code_fences(text: str) -> str:
+            t = text.strip()
+            if t.startswith("```"):
+                # remove leading fence
+                t = t.split("```", 1)[1]
+            if t.endswith("```"):
+                t = t.rsplit("```", 1)[0]
+            return t.strip()
+
         prompt = f"""
 You are helping two people plan activities based on their bucket lists.
 
@@ -212,7 +221,8 @@ Return ONLY JSON. No extra text.
                 temperature=0.4,
                 max_tokens=300
             )
-            content = response.choices[0].message.content.strip()
+            raw_content = response.choices[0].message.content.strip()
+            content = _strip_code_fences(raw_content)
             import json
             themes = json.loads(content)
             # Basic validation
@@ -228,6 +238,7 @@ Return ONLY JSON. No extra text.
             return cleaned[:4] if cleaned else []
         except Exception as e:
             logger.error(f"Error generating bucketlist themes: {e}")
+            logger.warning(f"Raw bucketlist theme content (sanitized): {raw_content if 'raw_content' in locals() else ''}")
             # Fallback heuristic themes from the items
             merged = [
                 me_items.get("travel", ""),

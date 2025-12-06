@@ -1,11 +1,114 @@
 """Real-world bucket list recommendations."""
 
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 import os
 import requests
 import urllib.parse
 
 from ai_utils import AIUtils
+
+# Cache city geocodes to avoid repeated calls
+_GEOCODE_CACHE: Dict[str, Tuple[float, float]] = {}
+
+# Places API v1 endpoints
+PLACES_TEXT_ENDPOINT = "https://places.googleapis.com/v1/places:searchText"
+
+# Field mask keeps payloads small and ensures required fields are present
+FIELD_MASK = (
+    "places.displayName,places.formattedAddress,"
+    "places.rating,places.userRatingCount,places.googleMapsUri,places.location"
+)
+
+
+def geocode_city(city: str) -> Optional[Tuple[float, float]]:
+    """Resolve a city name to (lat, lng) using Places Text Search v1 and cache it."""
+    city_key = city.strip().lower()
+    if not city_key:
+        return None
+    if city_key in _GEOCODE_CACHE:
+        return _GEOCODE_CACHE[city_key]
+
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        return None
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "places.location",
+    }
+    body = {
+        "textQuery": f"{city} city",
+        "maxResultCount": 1,
+    }
+
+    try:
+        resp = requests.post(PLACES_TEXT_ENDPOINT, headers=headers, json=body, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        places = data.get("places", [])
+        if not places:
+            return None
+        loc = places[0].get("location") or {}
+        lat, lng = loc.get("latitude"), loc.get("longitude")
+        if lat is None or lng is None:
+            return None
+        _GEOCODE_CACHE[city_key] = (lat, lng)
+        return (lat, lng)
+    except Exception:
+        return None
+
+
+def search_places_in_city(theme: Dict[str, str], city: str, max_results: int = 3) -> List[Dict[str, str]]:
+    """
+    Use Places Text Search v1 with city-biased query and optional locationBias.
+    Returns list of {name, address, url, rating, type}.
+    """
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key or not city:
+        return []
+
+    query = f"{theme.get('query', '')} in {city}".strip()
+    latlng = geocode_city(city)
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": FIELD_MASK,
+    }
+    body = {
+        "textQuery": query,
+        "maxResultCount": max_results,
+    }
+    if latlng:
+        lat, lng = latlng
+        body["locationBias"] = {
+            "circle": {
+                "center": {"latitude": lat, "longitude": lng},
+                "radius": 30000.0,  # 30km radius; adjust if needed
+            }
+        }
+
+    try:
+        resp = requests.post(PLACES_TEXT_ENDPOINT, headers=headers, json=body, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return []
+
+    results: List[Dict[str, str]] = []
+    for item in data.get("places", [])[:max_results]:
+        results.append(
+            {
+                "name": (item.get("displayName") or {}).get("text", ""),
+                "address": item.get("formattedAddress", ""),
+                "url": item.get("googleMapsUri", ""),
+                "rating": item.get("rating", 0),
+                "user_ratings_total": item.get("userRatingCount", 0),
+                "type": theme.get("type", ""),
+            }
+        )
+    return results
 
 
 def normalize_bucketlist_themes(me_items: Dict[str, str], partner_items: Dict[str, str]) -> List[Dict[str, str]]:
@@ -22,35 +125,20 @@ def normalize_bucketlist_themes(me_items: Dict[str, str], partner_items: Dict[st
 
 
 def search_real_places(theme: Dict[str, str], city: str) -> List[Dict[str, str]]:
-    """
-    Use Google Places Text Search to find venues matching theme+city.
-    Returns list of {name, address, url, type}.
-    """
-    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-    if not api_key or not city:
-        return []
-
-    query = f"{theme.get('query', '')} {city}".strip()
-    url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-    params = {"query": query, "key": api_key}
-
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception:
-        return []
-
-    results = []
-    for item in data.get("results", [])[:3]:  # take top 3 per theme
-        place_id = item.get("place_id")
-        results.append({
-            "name": item.get("name", ""),
-            "address": item.get("formatted_address", ""),
-            "url": f"https://www.google.com/maps/place/?q=place_id:{place_id}" if place_id else "",
-            "type": theme.get("type", ""),
-        })
-    return results
+    """Backward-compat wrapper to keep existing callers working."""
+    results = search_places_in_city(theme, city, max_results=3)
+    # Align keys with previous structure
+    aligned = []
+    for r in results:
+        aligned.append(
+            {
+                "name": r.get("name", ""),
+                "address": r.get("address", ""),
+                "url": r.get("url", ""),
+                "type": r.get("type", ""),
+            }
+        )
+    return aligned
 
 
 def build_maps_search_url(name: str, city: str) -> str:
@@ -106,32 +194,24 @@ def get_top_bucketlist_spots(me_items: Dict[str, str], partner_items: Dict[str, 
         return []
 
     def search_top_place(theme: Dict[str, str]) -> Dict[str, str]:
-        query = f"{theme.get('query', '')} {city}".strip()
-        url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-        params = {"query": query, "key": api_key}
-        try:
-            resp = requests.get(url, params=params, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception:
-            return {}
-
-        results = data.get("results", [])
+        results = search_places_in_city(theme, city, max_results=3)
         if not results:
             return {}
 
         best = max(
             results,
-            key=lambda r: (r.get("rating", 0), r.get("user_ratings_total", 0))
+            key=lambda r: (
+                r.get("rating", 0) or 0,
+                r.get("user_ratings_total", 0) or 0,
+            ),
         )
 
         name = best.get("name", "")
         if not name:
             return {}
-        address = best.get("formatted_address", "")
+        address = best.get("address", "")
         rating = best.get("rating", 0)
-        place_id = best.get("place_id")
-        place_url = f"https://www.google.com/maps/place/?q=place_id:{place_id}" if place_id else ""
+        place_url = best.get("url", "")
 
         reason = ai.explain_why_place_fits_bucketlist(theme, name, address, rating)
 
