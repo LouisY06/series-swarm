@@ -51,6 +51,8 @@ class StateManager:
         self.bucketlist_entries: Dict[Tuple[str, str], Dict[str, Dict[str, str]]] = {}
         # Pending city confirmations per pair
         self.pending_city: Dict[Tuple[str, str], Dict[str, str]] = {}
+        # Shared bucketlist plan text per pair (AI-generated plan)
+        self.shared_bucketlist_plans: Dict[Tuple[str, str], str] = {}
     
     def get_status(self, user_id: str) -> Status:
         """Get user status, defaulting to IDLE for new users."""
@@ -95,6 +97,12 @@ class StateManager:
     def pair_id_for(self, a: str, b: str) -> Tuple[str, str]:
         """Get canonical pair ID (sorted tuple)."""
         return tuple(sorted([a, b]))
+
+    def _pair_key(self, pair: Tuple[str, str]) -> Tuple[str, str]:
+        """Normalize a pair tuple to canonical key."""
+        if len(pair) != 2:
+            return tuple(sorted(pair))
+        return tuple(sorted(pair))
     
     def record_message(self, sender: str, partner: str, text: str):
         """Record a message in the conversation."""
@@ -254,6 +262,15 @@ class StateManager:
                 other = pid[0] if pid[1] == user_id else pid[1]
                 return other
         return None
+
+    # Shared bucketlist plan helpers
+    def set_shared_bucketlist_plan(self, user_a: str, user_b: str, plan_text: str):
+        pid = self.pair_id_for(user_a, user_b)
+        self.shared_bucketlist_plans[pid] = plan_text
+
+    def get_shared_bucketlist_plan(self, user_a: str, user_b: str) -> Optional[str]:
+        pid = self.pair_id_for(user_a, user_b)
+        return self.shared_bucketlist_plans.get(pid)
 
     # City confirmation helpers
     def set_pending_city(self, user_a: str, user_b: str, city: str, set_by: str):
