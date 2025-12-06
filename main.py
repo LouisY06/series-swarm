@@ -646,6 +646,17 @@ Send /help for all commands."""
             self.send(chat_id, phone, "You need to be in a conversation first. Type /match to find someone.")
             return True
 
+        # Prompt for city if missing so real-world recs can run
+        profile_me = self.switchboard.get_user_profile(phone)
+        profile_partner = self.switchboard.get_user_profile(partner)
+        city = profile_me.get("city") or profile_partner.get("city")
+        if not city:
+            city_hint = "Set a city with /setcity <City> to get real place recs in this chat."
+            self.send(chat_id, phone, city_hint)
+            partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+            if partner_chat:
+                self.send(partner_chat, partner, city_hint)
+
         self.state.set_bucketlist_active(phone, partner, True)
 
         instructions = (
@@ -744,6 +755,15 @@ Send /help for all commands."""
                             self.send(chat_id, user_id, real_text)
                         if partner_chat:
                             self.send(partner_chat, partner, real_text)
+                    else:
+                        notice = (
+                            "I couldn't find real places right now. "
+                            "If you set your city with /setcity and have a valid Google Maps API key, try again in a bit."
+                        )
+                        if chat_id:
+                            self.send(chat_id, user_id, notice)
+                        if partner_chat:
+                            self.send(partner_chat, partner, notice)
                 except Exception as e:
                     logger.error(f"Real-world bucketlist recs error: {e}", exc_info=True)
             else:
