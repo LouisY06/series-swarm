@@ -341,12 +341,12 @@ class SeriesSwarm:
             return self.handle_bucketlist(phone, chat_id)
         elif cmd == 'spotify':
             return self.handle_spotify(phone, chat_id)
+        elif cmd == 'spotifylink':
+            return self.handle_spotifylink(phone, chat_id, arg)
         elif cmd == 'quiz':
             return self.handle_quiz(phone, chat_id, arg)
         elif cmd == 'topspots':
             return self.handle_topspots(phone, chat_id)
-        elif cmd == 'spotify':
-            return self.handle_spotify(phone, chat_id)
 
         else:
             response = self.commands.execute_command(self.switchboard, phone, cmd, arg)
@@ -1085,6 +1085,41 @@ Send /help for all commands."""
             )
         else:
             self.send(chat_id, phone, "Couldn't generate Spotify link. Try again later.")
+        
+        return True
+    
+    def handle_spotifylink(self, phone: str, chat_id: Optional[int], arg: Optional[str]) -> bool:
+        """Handle /spotifylink command - complete Spotify auth with code from Vercel callback."""
+        if not self.quiz_game:
+            self.send(chat_id, phone, "Music quiz feature is not available.")
+            return True
+        
+        if not arg:
+            self.send(chat_id, phone, "Missing link code. Use /spotify to start fresh.")
+            return True
+        
+        try:
+            import base64
+            import json
+            # Decode the payload from Vercel callback
+            payload = json.loads(base64.b64decode(arg).decode('utf-8'))
+            state = payload.get('s')
+            code = payload.get('c')
+            
+            if not state or not code:
+                raise ValueError("Invalid payload")
+            
+            # Exchange code for token
+            user_phone = self.quiz_game.spotify.handle_callback(code, state)
+            
+            if user_phone:
+                self.send(chat_id, phone, "Spotify linked successfully! Use /quiz to start a music game with your partner.")
+            else:
+                self.send(chat_id, phone, "Couldn't complete Spotify link. Try /spotify again.")
+                
+        except Exception as e:
+            logger.error(f"Error in spotifylink: {e}")
+            self.send(chat_id, phone, "Invalid link code. Use /spotify to start fresh.")
         
         return True
     
