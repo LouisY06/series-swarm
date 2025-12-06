@@ -186,12 +186,13 @@ class SeriesSwarm:
                     (handle or {}).get('identifier') == self.sender_number
                     for handle in chat_handles
                 )
-                if not our_number_in_chat:
-                    logger.warning(f"Skipping message not for our number. chat_handles={chat_handles}")
-                    return True
             else:
                 # Some events may not include chat_handles; process them
                 logger.debug("No chat_handles provided; processing message")
+                our_number_in_chat = True
+            if not our_number_in_chat:
+                logger.warning(f"Skipping message not for our number. chat_handles={chat_handles}")
+                return True
             
             logger.info(f"Processing message for {self.sender_number}")
 
@@ -475,7 +476,7 @@ Send /help for all commands."""
             self.state.set_status(user_id, Status.READY)
             self.send(chat_id, user_id, "You're not in a conversation. Send /match to meet someone.")
             return True
-
+        
         # Handle active quiz - treat message as a guess
         if self.quiz_game and self.quiz_game.has_active_quiz(user_id):
             return self.handle_quiz_guess(user_id, chat_id, text)
@@ -809,8 +810,21 @@ Send /help for all commands."""
                     places = get_real_world_recommendations(me_items, partner_items, city)
                     if places:
                         lines = [f"📍 Real places in {city} that match your bucket list:"]
+                        label_map = {
+                            "travel": "Travel",
+                            "experience": "Experience",
+                            "food": "Food",
+                            "shrine": "Shrine",
+                            "ski": "Ski",
+                            "onsen": "Onsen",
+                            "shopping": "Shopping",
+                            "class": "Class",
+                            "attraction": "Attraction",
+                            "other": "Idea",
+                        }
                         for place in places:
-                            label = place.get("type", "").capitalize() or "Idea"
+                            ptype = (place.get("type", "") or "").lower()
+                            label = label_map.get(ptype, ptype.capitalize() or "Idea")
                             name = place.get("name", "")
                             addr = place.get("address", "")
                             url = place.get("url", "")
