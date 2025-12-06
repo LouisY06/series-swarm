@@ -3,6 +3,7 @@
 from .spotify_client import SpotifyClient
 from .genius_client import GeniusClient
 from .quiz_game import QuizGame, QuizState
+from .oauth_server import OAuthCallbackServer
 
-__all__ = ['SpotifyClient', 'GeniusClient', 'QuizGame', 'QuizState']
+__all__ = ['SpotifyClient', 'GeniusClient', 'QuizGame', 'QuizState', 'OAuthCallbackServer']
 

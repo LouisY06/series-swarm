@@ -23,7 +23,7 @@ from realworld.bucketlist import get_real_world_recommendations, get_top_bucketl
 
 # Music Quiz feature (optional - gracefully handles missing dependencies)
 try:
-    from features.music_quiz import SpotifyClient, GeniusClient, QuizGame
+    from features.music_quiz import SpotifyClient, GeniusClient, QuizGame, OAuthCallbackServer
     MUSIC_QUIZ_AVAILABLE = True
 except ImportError:
     MUSIC_QUIZ_AVAILABLE = False
@@ -84,13 +84,27 @@ class SeriesSwarm:
         
         # Initialize music quiz feature if available
         self.quiz_game = None
+        self.oauth_server = None
         if MUSIC_QUIZ_AVAILABLE:
             try:
                 spotify_client = SpotifyClient()
                 genius_client = GeniusClient()
                 if spotify_client.is_available() and genius_client.is_available():
                     self.quiz_game = QuizGame(spotify_client, genius_client)
-                    logger.info("Music quiz feature initialized")
+                    
+                    # Start OAuth callback server
+                    def on_spotify_auth(user_phone, success):
+                        if success and user_phone:
+                            chat_id = self.state.get_chat_id(user_phone) or self.switchboard.get_chat_id(user_phone)
+                            if chat_id:
+                                self.send(chat_id, user_phone, "Spotify connected! Use /quiz to start a music game with your partner.")
+                    
+                    self.oauth_server = OAuthCallbackServer(
+                        spotify_client,
+                        on_auth_complete=on_spotify_auth
+                    )
+                    self.oauth_server.start(threaded=True)
+                    logger.info("Music quiz feature initialized with OAuth server")
                 else:
                     logger.warning("Music quiz feature disabled (missing API keys)")
             except Exception as e:
