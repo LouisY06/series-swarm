@@ -6,6 +6,7 @@ import logging
 import signal
 import threading
 import time
+import uuid
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
@@ -254,7 +255,9 @@ class SeriesSwarm:
         elif cmd == 'topics':
             return self.handle_topics(phone, chat_id)
         elif cmd == 'icebreaker':
-            return self.handle_icebreaker_command(phone, chat_id)
+            return self.handle_icebreaker(phone, chat_id)
+        elif cmd == 'bucketlist':
+            return self.handle_bucketlist(phone, chat_id)
 
         else:
             response = self.commands.execute_command(self.switchboard, phone, cmd, arg)
@@ -330,10 +333,6 @@ Anytime you want, send /help for commands."""
             self.send(chat_id, user_id, "You're not in a conversation. Send /match to meet someone.")
             return True
 
-        # Icebreaker flow intercepts and handles privately
-        if self.handle_icebreaker_flow(user_id, chat_id, partner, text):
-            return True
-        
         # Capture partner last message time before we record this one
         partner_last_ts = self.state.get_last_message_ts_for_user(partner)
 
@@ -430,109 +429,81 @@ Anytime you want, send /help for commands."""
         self.send(chat_id, user_id, "Topics you've covered:\n" + topics)
         return True
 
-    def handle_icebreaker_command(self, user_id: str, chat_id: Optional[int]) -> bool:
-        """Start Two Truths and a Lie icebreaker."""
-        partner = self.state.get_partner(user_id)
+    def handle_icebreaker(self, phone: str, chat_id: Optional[int]) -> bool:
+        """Start web-based icebreaker session and share links."""
+        partner = self.state.get_partner(phone)
         if not partner:
-            self.send(chat_id, user_id, "You are not in a conversation. Send /match to meet someone.")
+            self.send(chat_id, phone, "You need to be in a conversation first. Type /match to find someone.")
             return True
 
-        self.state.start_icebreaker(user_id, partner)
-        partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+        # Generate or reuse session_id for the pair
+        session_id = self.state.get_icebreaker_session(phone, partner)
+        if not session_id:
+            session_id = uuid.uuid4().hex
+            self.state.set_icebreaker_session(phone, partner, session_id)
 
-        intro_msg = (
-            "🎲 Two Truths and a Lie!\n\n"
-            "Send me your three statements privately like this:\n"
-            "me: statement1 / statement2 / statement3*\n\n"
-            "- Mark the lie with a * at the end of that statement.\n"
-            "I won't show the * to your partner.\n"
-            "They'll guess 1-3 which is the lie."
+        base_url = os.getenv("ICEBREAKER_BASE_URL", "https://your-game-host")
+        url_self = f"{base_url}/game?session={session_id}&who=me"
+        url_partner = f"{base_url}/game?session={session_id}&who=partner"
+
+        self.send(
+            chat_id,
+            phone,
+            "🎮 I set up an icebreaker game for you two.\n"
+            "Tap this link to play together, then come back here to keep chatting:\n"
+            f"{url_self}"
         )
-        self.send(chat_id, user_id, intro_msg)
+
+        partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
         if partner_chat:
-            self.send(partner_chat, partner, intro_msg)
+            self.send(
+                partner_chat,
+                partner,
+                "🎮 Your partner started an icebreaker game.\n"
+                "Tap this link to join, then come back here to keep chatting:\n"
+                f"{url_partner}"
+            )
         return True
 
-    def handle_icebreaker_flow(self, user_id: str, chat_id: Optional[int], partner: str, text: str) -> bool:
-        """Process icebreaker submissions/guesses. Returns True if handled."""
-        if not self.state.icebreaker_active(user_id, partner):
-            return False
-
-        t = text.strip()
-        lower = t.lower()
-
-        # Statements submission
-        if lower.startswith("me:"):
-            payload = t[3:].strip()
-            parts = [p.strip() for p in payload.split("/") if p.strip()]
-            if len(parts) != 3:
-                self.send(chat_id, user_id, "Please send exactly 3 statements separated by '/'. Mark the lie with *.")
-                return True
-            lie_index = None
-            clean_parts = []
-            for idx, p in enumerate(parts):
-                if p.endswith("*"):
-                    lie_index = idx
-                    p = p[:-1].rstrip()
-                clean_parts.append(p)
-            if lie_index is None:
-                self.send(chat_id, user_id, "Please mark the lie with a * at the end of that statement.")
-                return True
-
-            self.state.set_icebreaker_statements(user_id, partner, clean_parts, lie_index)
-            self.send(chat_id, user_id, "Got your statements. Waiting for your partner.")
-
-            ib = self.state.get_icebreaker(user_id, partner)
-            partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
-
-            # If both have submitted, send to each partner
-            if partner in ib["statements"] and user_id in ib["statements"]:
-                # send partner's statements to user
-                partner_stmts = ib["statements"][partner]
-                formatted = "\n".join([f"{i+1}. {s}" for i, s in enumerate(partner_stmts)])
-                self.send(chat_id, user_id, f"Here are your partner's statements:\n{formatted}\nWhich one is the lie? Reply 1-3.")
-
-                user_stmts = ib["statements"][user_id]
-                formatted_user = "\n".join([f"{i+1}. {s}" for i, s in enumerate(user_stmts)])
-                if partner_chat:
-                    self.send(partner_chat, partner, f"Here are your partner's statements:\n{formatted_user}\nWhich one is the lie? Reply 1-3.")
+    def handle_bucketlist(self, phone: str, chat_id: Optional[int]) -> bool:
+        """Start web-based Shared Bucket List Builder and share links."""
+        partner = self.state.get_partner(phone)
+        if not partner:
+            self.send(chat_id, phone, "You need to be in a conversation first. Type /match to find someone.")
             return True
 
-        # Guess handling
-        if lower.isdigit() and lower in {"1", "2", "3"}:
-            guess_index = int(lower) - 1
-        elif lower.startswith("guess:"):
-            guess_payload = lower[6:].strip()
-            if guess_payload.isdigit() and guess_payload in {"1", "2", "3"}:
-                guess_index = int(guess_payload) - 1
-            else:
-                self.send(chat_id, user_id, "Guess with a number 1-3.")
-                return True
+        # Get or create session for this pair
+        session_id = self.state.get_icebreaker_session(phone, partner)
+        if not session_id:
+            session_id = uuid.uuid4().hex
+            self.state.set_icebreaker_session(phone, partner, session_id)
+            logger.info(f"Created bucketlist session {session_id} for {phone} and {partner}")
         else:
-            # Not an icebreaker message
-            return False
+            logger.info(f"Reusing bucketlist session {session_id} for {phone} and {partner}")
 
-        ib = self.state.get_icebreaker(user_id, partner)
-        partner_stmts = ib["statements"].get(partner)
-        partner_lie = ib["lie_index"].get(partner)
-        if not partner_stmts or partner_lie is None:
-            self.send(chat_id, user_id, "I'm still waiting for your partner's statements.")
-            return True
+        base_url = os.getenv("ICEBREAKER_BASE_URL", "https://your-game-host").rstrip("/")
+        url_self = f"{base_url}/bucketlist?session={session_id}&who=me"
+        url_partner = f"{base_url}/bucketlist?session={session_id}&who=partner"
 
-        self.state.set_icebreaker_guess(user_id, partner, guess_index)
-        if guess_index == partner_lie:
-            self.send(chat_id, user_id, "✅ Correct! You spotted the lie.")
+        self.send(
+            chat_id,
+            phone,
+            "📝 Shared Bucket List Builder\n"
+            "Tap this link to build a bucket list together, then come back here to keep chatting:\n"
+            f"{url_self}"
+        )
+
+        partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+        if partner_chat:
+            self.send(
+                partner_chat,
+                partner,
+                "📝 Your partner started a Shared Bucket List Builder game.\n"
+                "Tap this link to join, then come back here to keep chatting:\n"
+                f"{url_partner}"
+            )
         else:
-            self.send(chat_id, user_id, f"❌ Not quite. The lie was number {partner_lie + 1}.")
-
-        # Check if both guessed, then clear
-        partner_guess = ib["guesses"].get(partner)
-        if partner_guess is not None and ib["guesses"].get(user_id) is not None:
-            partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
-            self.send(chat_id, user_id, "Icebreaker complete! Keep chatting or try /icebreaker again.")
-            if partner_chat:
-                self.send(partner_chat, partner, "Icebreaker complete! Keep chatting or try /icebreaker again.")
-            self.state.clear_icebreaker(user_id, partner)
+            logger.warning(f"No chat_id for partner {partner} when starting bucketlist game.")
 
         return True
 

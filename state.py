@@ -40,6 +40,9 @@ class StateManager:
         
         # Icebreaker state per pair
         self.icebreakers: Dict[Tuple[str, str], Dict[str, any]] = {}
+        # Web icebreaker sessions mapping
+        self.icebreaker_sessions: Dict[Tuple[str, str], str] = {}
+        self.icebreaker_session_users: Dict[str, Tuple[str, str]] = {}
     
     def get_status(self, user_id: str) -> Status:
         """Get user status, defaulting to IDLE for new users."""
@@ -211,4 +214,23 @@ class StateManager:
 
     def icebreaker_active(self, a: str, b: str) -> bool:
         return self._get_ib(a, b).get("active", False)
+
+    # Web icebreaker session helpers
+    def set_icebreaker_session(self, user_a: str, user_b: str, session_id: str):
+        pid = self.pair_id_for(user_a, user_b)
+        self.icebreaker_sessions[pid] = session_id
+        self.icebreaker_session_users[session_id] = (user_a, user_b)
+
+    def get_icebreaker_session(self, user_a: str, user_b: str) -> Optional[str]:
+        pid = self.pair_id_for(user_a, user_b)
+        return self.icebreaker_sessions.get(pid)
+
+    def clear_icebreaker_session(self, user_a: str, user_b: str):
+        pid = self.pair_id_for(user_a, user_b)
+        sess = self.icebreaker_sessions.pop(pid, None)
+        if sess:
+            self.icebreaker_session_users.pop(sess, None)
+
+    def get_users_for_session(self, session_id: str) -> Optional[Tuple[str, str]]:
+        return self.icebreaker_session_users.get(session_id)
 

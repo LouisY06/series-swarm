@@ -22,6 +22,7 @@ class CommandHandler:
         'mood': ['/mood', 'mood'],
         'topics': ['/topics', 'topics'],
         'icebreaker': ['/icebreaker', 'icebreaker'],
+        'bucketlist': ['/bucketlist', 'bucketlist'],
     }
 
     @staticmethod
