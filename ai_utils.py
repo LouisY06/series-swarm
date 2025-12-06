@@ -92,6 +92,75 @@ Do not use emojis."""
                 "- Mention any boundaries (e.g., keep it casual)"
             )
     
+    def generate_bucketlist_suggestions(
+        self,
+        me_items: Dict[str, str],
+        partner_items: Dict[str, str]
+    ) -> str:
+        """
+        Given two 5-item bucket lists (travel, skill, food, adventure, creative),
+        generate 2–4 concrete activities they could realistically do together.
+        """
+
+        def _fmt(items: Dict[str, str]) -> str:
+            return (
+                f"1) Travel: {items.get('travel', '').strip()}\n"
+                f"2) Skill: {items.get('skill', '').strip()}\n"
+                f"3) Food: {items.get('food', '').strip()}\n"
+                f"4) Adventure: {items.get('adventure', '').strip()}\n"
+                f"5) Creative: {items.get('creative', '').strip()}\n"
+            )
+
+        me_text = _fmt(me_items)
+        partner_text = _fmt(partner_items)
+
+        prompt = f"""
+You are helping two people plan activities based on their bucket lists.
+
+Bucket list A:
+{me_text}
+
+Bucket list B:
+{partner_text}
+
+Your job:
+- Find overlaps, complements, or natural combos between their lists.
+- Suggest 2–4 specific activities they could realistically do together.
+- Each activity should feel like a real plan (location or vibe + what they'd do).
+- Focus on shared regions/themes instead of inventing totally new ones.
+- Keep it short and friendly.
+- No emojis.
+- Format as bullet points starting with "- ".
+
+Output only the bullet list, nothing else.
+"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a social coordinator who creates concrete, fun joint plans from two bucket lists."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.7,
+                max_tokens=250
+            )
+            suggestions = response.choices[0].message.content.strip()
+            return suggestions
+        except Exception as e:
+            logger.error(f"Error generating bucketlist suggestions: {e}")
+            return (
+                "- Pick one travel destination you both like and plan a weekend itinerary.\n"
+                "- Choose one skill (painting/drawing, music, etc.) and do a mini session together.\n"
+                "- Go for a food crawl that fits both your tastes.\n"
+                "- Combine your most adventurous idea into a future trip."
+            )
+    
     def generate_profile_resume(
         self,
         viewer_id: str,

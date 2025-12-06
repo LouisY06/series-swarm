@@ -683,6 +683,20 @@ Send /help for all commands."""
             else:
                 logger.warning(f"Could not deliver merged bucketlist to {partner}: missing chat_id")
 
+            # AI suggestions based on both lists
+            try:
+                suggestions = self.ai.generate_bucketlist_suggestions(me_items, partner_items)
+                suggestions_text = (
+                    "Here are a few things you could actually do together based on your lists:\n"
+                    f"{suggestions}"
+                )
+                if chat_id:
+                    self.send(chat_id, user_id, suggestions_text)
+                if partner_chat:
+                    self.send(partner_chat, partner, suggestions_text)
+            except Exception as e:
+                logger.error(f"Bucketlist suggestions error: {e}", exc_info=True)
+
             self.state.clear_bucketlist(user_id, partner)
 
         return True
