@@ -25,6 +25,19 @@ logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
 
+
+@app.get("/", response_class=JSONResponse)
+async def root():
+    """Provide quick links for available demo routes."""
+    return {
+        "message": "Use /game or /bucketlist with ?session=<id>&who=<me|partner>.",
+        "examples": {
+            "game": "/game?session=demo&who=me",
+            "bucketlist": "/bucketlist?session=demo&who=me",
+            "docs": "/docs",
+        },
+    }
+
 # In-memory session store: session_id -> { "statements": { "me": str, "partner": str } }
 sessions: Dict[str, Dict] = {}
 # In-memory bucket list store: session_id -> { "me": {...}, "partner": {...} }

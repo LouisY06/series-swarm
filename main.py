@@ -15,6 +15,7 @@ from agents import generate_vcard
 from state import StateManager, Status
 from ai_utils import AIUtils
 from collections import defaultdict
+from icebreakers.imessage import parse_statements, format_partner_share
 
 load_dotenv()
 
@@ -256,6 +257,8 @@ class SeriesSwarm:
             return self.handle_topics(phone, chat_id)
         elif cmd == 'icebreaker':
             return self.handle_icebreaker(phone, chat_id)
+        elif cmd == 'icebreakers':
+            return self.handle_icebreakers(phone, chat_id)
         elif cmd == 'bucketlist':
             return self.handle_bucketlist(phone, chat_id)
 
@@ -332,6 +335,10 @@ Anytime you want, send /help for commands."""
             self.state.set_status(user_id, Status.READY)
             self.send(chat_id, user_id, "You're not in a conversation. Send /match to meet someone.")
             return True
+
+        # Handle in-chat icebreaker flow before relaying messages
+        if self.state.icebreaker_active(user_id, partner):
+            return self.handle_icebreakers_message(user_id, partner, chat_id, text)
 
         # Capture partner last message time before we record this one
         partner_last_ts = self.state.get_last_message_ts_for_user(partner)
@@ -427,6 +434,82 @@ Anytime you want, send /help for commands."""
             return True
         topics = self.ai.generate_topics(conversation)
         self.send(chat_id, user_id, "Topics you've covered:\n" + topics)
+        return True
+
+    def handle_icebreakers(self, phone: str, chat_id: Optional[int]) -> bool:
+        """Start in-chat Two Truths and a Lie (no web UI)."""
+        partner = self.state.get_partner(phone)
+        if not partner:
+            self.send(chat_id, phone, "You need to be in a conversation first. Type /match to find someone.")
+            return True
+
+        self.state.start_icebreaker(phone, partner)
+
+        partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+
+        instructions = (
+            "🎲 Let's play Two Truths and a Lie right here.\n"
+            "Send ONE message with THREE lines: truth, truth, LIE (lie goes LAST).\n"
+            "Example:\n"
+            "I ran a marathon\n"
+            "I speak Italian\n"
+            "I have never flown on a plane"
+        )
+
+        self.send(chat_id, phone, instructions)
+        if partner_chat:
+            self.send(
+                partner_chat,
+                partner,
+                "🎲 Your partner started Two Truths and a Lie.\n"
+                "Reply with three lines in one message: truth, truth, LIE (lie last).\n"
+                "When both of you send yours, I'll share them."
+            )
+        else:
+            logger.warning(f"No chat_id for partner {partner} when starting in-chat icebreaker.")
+
+        return True
+
+    def handle_icebreakers_message(self, user_id: str, partner: str, chat_id: Optional[int], text: str) -> bool:
+        """Capture statements for the in-chat icebreaker and share once both respond."""
+        if not text.strip():
+            self.send(chat_id, user_id, "Please send three lines (truth, truth, lie last) in one message.")
+            return True
+
+        ib = self.state.get_icebreaker(user_id, partner)
+        statements_map = ib.get("statements", {})
+
+        if user_id in statements_map:
+            if len(statements_map) == 2:
+                self.send(chat_id, user_id, "Already shared both sets. Keep chatting!")
+            else:
+                self.send(chat_id, user_id, "Got your two truths and a lie. Waiting for your partner.")
+            return True
+
+        parsed = parse_statements(text)
+        if len(parsed) < 3:
+            self.send(chat_id, user_id, "I need three lines: truth, truth, lie (lie last). Please resend all three.")
+            return True
+
+        statements = parsed[:3]
+        self.state.set_icebreaker_statements(user_id, partner, statements, lie_index=2)
+        self.send(chat_id, user_id, "Got your two truths and a lie. Waiting for your partner.")
+
+        ib = self.state.get_icebreaker(user_id, partner)
+        if len(ib.get("statements", {})) == 2:
+            partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+            partner_statements = ib["statements"].get(partner)
+            user_statements = ib["statements"].get(user_id)
+
+            if partner_statements and chat_id:
+                self.send(chat_id, user_id, format_partner_share(partner_statements))
+            if user_statements and partner_chat:
+                self.send(partner_chat, partner, format_partner_share(user_statements))
+            elif not partner_chat:
+                logger.warning(f"Could not share icebreaker statements with {partner}: missing chat_id")
+
+            self.state.clear_icebreaker(user_id, partner)
+
         return True
 
     def handle_icebreaker(self, phone: str, chat_id: Optional[int]) -> bool:
