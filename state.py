@@ -8,7 +8,10 @@ from typing import Dict, List, Tuple, Optional
 class Status(str, Enum):
     """User status in the system."""
     IDLE = "idle"
-    ONBOARDING = "onboarding"
+    ONBOARDING_NAME = "onboarding_name"
+    ONBOARDING_EMAIL = "onboarding_email"
+    ONBOARDING_INTRO = "onboarding_intro"
+    ONBOARDING = "onboarding"  # Legacy, maps to ONBOARDING_INTRO
     READY = "ready"
     SEARCHING = "searching"
     PREVIEW = "preview"
