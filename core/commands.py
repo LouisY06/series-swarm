@@ -101,6 +101,7 @@ class CommandHandler:
         'icebreakers': ['/icebreakers'],
         'bucketlist': ['/bucketlist'],
         'spotify': ['/spotify'],
+        'spotifylink': ['/spotifylink'],
         'quiz': ['/quiz'],
     }
 
