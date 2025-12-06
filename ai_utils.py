@@ -1,11 +1,28 @@
 """LLM utilities for preview generation and profile building."""
 
 import os
+import json
 import logging
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
 
 logger = logging.getLogger(__name__)
+
+def _strip_code_fences(text: str) -> str:
+    """
+    Remove ``` or ```json fences so the payload can be parsed as JSON.
+    """
+    if text is None:
+        return ""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines:
+            lines = lines[1:]
+        text = "\n".join(lines)
+    if text.endswith("```"):
+        text = text.rsplit("```", 1)[0]
+    return text.strip()
 
 
 class AIUtils:
@@ -259,6 +276,56 @@ Return ONLY JSON. No extra text.
                 {"label": "Shared trip", "query": fallback_query, "type": "travel"},
                 {"label": "Shared food", "query": " ".join(top[:2]), "type": "food"},
             ]
+
+    def generate_bucketlist_themes_from_plan(self, shared_plan: str) -> List[Dict[str, str]]:
+        """
+        Derive 2-4 themes from the AI-written shared plan text.
+        Each theme is a dict: {label, query, type}.
+        """
+        prompt = """
+You are helping two people turn a shared date plan into Google Maps search queries.
+
+You will be given a plan text that includes several distinct activities they could do together.
+Examples of activities: districts/neighborhoods, shrines/temples, onsen, ski resorts,
+cooking or art classes, restaurants/omakase, shopping areas, other attractions.
+
+TASK:
+1) Read the plan carefully.
+2) Extract ONE theme for EACH distinct activity in the plan.
+3) For each activity, produce:
+   - "label": short human name for the activity.
+   - "query": a Google Maps–style search query that will likely return a place.
+   - "type": one of: food, shrine, onsen, ski, shopping, class, attraction,
+     travel, experience, other.
+
+Return ONLY JSON array, no extra text:
+[
+  {"label": "...", "query": "...", "type": "..."},
+  ...
+]
+        """.strip()
+
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": shared_plan},
+        ]
+
+        try:
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.4,
+            )
+            raw = resp.choices[0].message.content
+            logger.warning("Raw bucketlist theme content (sanitized): %s", raw)
+            cleaned = _strip_code_fences(raw)
+            themes = json.loads(cleaned)
+            if not isinstance(themes, list):
+                raise ValueError("Expected a list of themes")
+            return themes
+        except Exception as e:
+            logger.error(f"Error generating bucketlist themes from plan: {e}")
+            return []
 
     def generate_bucketlist_place_ideas(
         self,

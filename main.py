@@ -19,7 +19,7 @@ from ai_utils import AIUtils
 from collections import defaultdict
 from icebreakers.imessage import parse_statements, format_partner_share
 from icebreakers.bucketlist import parse_bucketlist, format_shared_bucketlist, format_captured
-from realworld.bucketlist import get_real_world_recommendations, get_top_bucketlist_spots
+from realworld.bucketlist import get_real_world_recommendations, get_top_bucketlist_spots, get_top_spots_for_themes
 
 # Music Quiz feature (optional - gracefully handles missing dependencies)
 try:
@@ -791,6 +791,8 @@ Send /help for all commands."""
                     f"{suggestions}\n\n"
                     "Reply /topspots if you want me to find top-rated real places that match these ideas."
                 )
+                # Store plan text so /topspots can read it later
+                self.state.set_shared_bucketlist_plan(user_id, partner, suggestions_text)
                 if chat_id:
                     self.send(chat_id, user_id, suggestions_text)
                 if partner_chat:
@@ -909,10 +911,7 @@ Send /help for all commands."""
 
         me_items = pair_entries.get(phone)
         partner_items = pair_entries.get(partner)
-        if not me_items or not partner_items:
-            self.send(chat_id, phone, "I don't have a shared bucket list for you two yet. Try /bucketlist first.")
-            return True
-
+        # City from either profile
         profile_self = self.switchboard.get_user_profile(phone)
         profile_partner = self.switchboard.get_user_profile(partner)
         city = (profile_self.get("city") or profile_partner.get("city") or "").strip()
@@ -920,40 +919,67 @@ Send /help for all commands."""
             self.send(chat_id, phone, "Set your city first so I can find real places. Use /setcity <city>.")
             return True
 
+        # Shared plan text (AI suggestions) stored when bucketlist merged
+        shared_plan = self.state.get_shared_bucketlist_plan(phone, partner)
+        if not shared_plan and me_items and partner_items:
+            # Fallback: regenerate plan so we can build themes
+            try:
+                shared_plan = (
+                    "Here are a few things you could actually do together based on your lists:\n"
+                    f"{self.ai.generate_bucketlist_suggestions(me_items, partner_items)}"
+                )
+                self.state.set_shared_bucketlist_plan(phone, partner, shared_plan)
+            except Exception as e:
+                logger.error(f"Failed to regenerate shared plan for topspots: {e}", exc_info=True)
+
+        if not shared_plan:
+            self.send(chat_id, phone, "I don't have a shared plan yet. Run /bucketlist first and then try /topspots.")
+            return True
+
+        # Themes from plan text
+        themes = self.ai.generate_bucketlist_themes_from_plan(shared_plan)
+        if not themes:
+            self.send(chat_id, phone, "I couldn't read your plan to build real-world searches. Try /topspots again.")
+            return True
+
         try:
-            tops = get_top_bucketlist_spots(me_items, partner_items, city)
+            spots = get_top_spots_for_themes(themes, city)
         except Exception as e:
             logger.error(f"Error computing top spots for {phone}: {e}", exc_info=True)
             self.send(chat_id, phone, "I had trouble finding specific places just now.")
             return True
 
-        if not tops:
+        if not spots:
             self.send(chat_id, phone, f"I couldn't find good top-rated matches in {city} right now.")
             return True
 
-        lines = [f"🎯 Top picks for your shared bucket list in {city}:"]
-        for spot in tops:
-            label = spot.get("label", "Idea")
-            name = spot.get("name", "")
-            addr = spot.get("address", "")
-            rating = spot.get("rating", 0)
-            url = spot.get("url", "")
-            reason = spot.get("reason", "")
+        lines = [f"🎯 Top picks for your shared bucket list in {city}:\n"]
+        for spot in spots:
+            label = spot.get("theme_label", "Idea")
+            place = spot.get("place", {}) or {}
+            name = place.get("name", "")
+            addr = place.get("address", "")
+            rating = place.get("rating")
+            url = place.get("url", "") or place.get("googleMapsUri", "")
+            why = spot.get("why", "")
+            why_popular = spot.get("why_popular", "")
 
-            lines.append("")
             lines.append(f"• {label}:")
             core = f"  {name}"
             if rating:
-                core += f" ({rating:.1f}★)"
+                core += f" ({float(rating):.1f}★)"
             lines.append(core)
+            if why:
+                lines.append(f"  {why}")
+            if why_popular:
+                lines.append(f"  {why_popular}")
             if addr:
                 lines.append(f"  {addr}")
-            if reason:
-                lines.append(f"  {reason}")
             if url:
                 lines.append(f"  {url}")
+            lines.append("")  # spacer
 
-        msg = "\n".join(lines)
+        msg = "\n".join(lines).strip()
 
         chat_self = chat_id or self.state.get_chat_id(phone) or self.switchboard.get_chat_id(phone)
         chat_partner = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)

@@ -232,3 +232,92 @@ def get_top_bucketlist_spots(me_items: Dict[str, str], partner_items: Dict[str, 
             tops.append(place)
     return tops[:3]
 
+
+def _why_for_type(ttype: str) -> str:
+    t = (ttype or "").lower()
+    if t == "shrine":
+        return "Picked because you mentioned visiting shrines or spiritual places together."
+    if t in ("ski", "adventure"):
+        return "Matches your plan to go skiing or snowboarding together."
+    if t in ("onsen", "hot_spring"):
+        return "Aligns with your idea to relax at an onsen or hot spring."
+    if t == "shopping":
+        return "You mentioned exploring shopping districts together."
+    if t == "class":
+        return "Fits your plan to take a hands-on class together, like cooking or art."
+    if t == "food":
+        return "You talked about sharing food experiences like omakase or ramen."
+    if t in ("travel", "attraction", "experience"):
+        return "Matches your interest in exploring memorable places on your trip."
+    return "Best fit for the activity you described."
+
+
+def get_top_spots_for_themes(themes: List[Dict[str, str]], city: str) -> List[Dict[str, str]]:
+    """
+    For each theme, fetch one top place anchored to the given city.
+    Returns list of dicts with theme_label, query, place, why, why_popular.
+    """
+    if not city or not themes:
+        return []
+
+    results: List[Dict[str, str]] = []
+
+    for theme in themes:
+        label = theme.get("label") or theme.get("name") or "Idea"
+        query = theme.get("query", "").strip()
+        ttype = (theme.get("type") or "").lower()
+
+        if not query:
+            query = f"{label} {city}"
+
+        # Refine queries to improve relevance
+        if ttype == "shrine":
+            query = f"{query} shrine {city}"
+        elif ttype in ("onsen", "hot_spring"):
+            query = f"{query} onsen hot spring {city}"
+        elif ttype in ("ski", "adventure"):
+            query = f"{query} ski resort {city}"
+        elif ttype == "shopping":
+            query = f"{query} shopping district {city}"
+        elif ttype == "class":
+            query = f"{query} class {city}"
+        elif ttype in ("travel", "attraction", "experience", "food"):
+            query = f"{query} {city}"
+
+        places = search_places_in_city({"query": query, "type": ttype, "label": label}, city, max_results=3)
+        if not places:
+            continue
+
+        best = max(
+            places,
+            key=lambda r: (
+                r.get("rating", 0) or 0,
+                r.get("user_ratings_total", 0) or 0,
+            ),
+        )
+
+        rating = best.get("rating")
+        user_ratings_total = best.get("user_ratings_total")
+
+        why = _why_for_type(ttype)
+        if rating and user_ratings_total:
+            why_popular = (
+                f"It's popular with locals and visitors, with a {rating}★ rating across {user_ratings_total} reviews."
+            )
+        elif rating:
+            why_popular = f"It's well liked, reflected in its {rating}★ rating."
+        else:
+            why_popular = "It's a well known spot that many people recommend in the area."
+
+        results.append(
+            {
+                "theme_label": label,
+                "query": query,
+                "place": best,
+                "why": why,
+                "why_popular": why_popular,
+            }
+        )
+
+    return results
+
