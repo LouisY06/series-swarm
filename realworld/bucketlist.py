@@ -3,6 +3,7 @@
 from typing import Dict, List
 import os
 import requests
+import urllib.parse
 
 from ai_utils import AIUtils
 
@@ -52,15 +53,41 @@ def search_real_places(theme: Dict[str, str], city: str) -> List[Dict[str, str]]
     return results
 
 
+def build_maps_search_url(name: str, city: str) -> str:
+    query = urllib.parse.quote_plus(f"{name} {city}".strip())
+    return f"https://www.google.com/maps/search/?api=1&query={query}"
+
+
 def get_real_world_recommendations(me_items: Dict[str, str], partner_items: Dict[str, str], city: str) -> List[Dict[str, str]]:
     """
     Full pipeline: themes -> place search -> flattened list.
     """
     if not city:
         return []
-    themes = normalize_bucketlist_themes(me_items, partner_items)
+
     all_places: List[Dict[str, str]] = []
-    for theme in themes:
-        all_places.extend(search_real_places(theme, city))
-    return all_places[:6]  # cap total
+
+    # Try Google Places first if key is present
+    if os.getenv("GOOGLE_MAPS_API_KEY"):
+        themes = normalize_bucketlist_themes(me_items, partner_items)
+        for theme in themes:
+            all_places.extend(search_real_places(theme, city))
+        if all_places:
+            return all_places[:6]
+
+    # Fallback: use LLM place ideas and build Maps search links
+    ai = AIUtils()
+    ideas = ai.generate_bucketlist_place_ideas(me_items, partner_items, city)
+    for idea in ideas:
+        name = idea.get("name", "")
+        if not name:
+            continue
+        all_places.append({
+            "name": name,
+            "address": idea.get("note", ""),
+            "url": build_maps_search_url(name, city),
+            "type": idea.get("type", "experience"),
+        })
+
+    return all_places[:6]
 

@@ -248,6 +248,80 @@ Return ONLY JSON. No extra text.
                 {"label": "Shared trip", "query": fallback_query, "type": "travel"},
                 {"label": "Shared food", "query": " ".join(top[:2]), "type": "food"},
             ]
+
+    def generate_bucketlist_place_ideas(
+        self,
+        me_items: Dict[str, str],
+        partner_items: Dict[str, str],
+        city: str
+    ) -> List[Dict[str, str]]:
+        """
+        Use LLM to suggest 2-4 real-world places (name, note, type) given bucket lists and city.
+        Returns a list of dicts with keys: name, note, type.
+        """
+
+        def _fmt(items: Dict[str, str]) -> str:
+            return (
+                f"1) Travel: {items.get('travel', '').strip()}\n"
+                f"2) Skill: {items.get('skill', '').strip()}\n"
+                f"3) Food: {items.get('food', '').strip()}\n"
+                f"4) Adventure: {items.get('adventure', '').strip()}\n"
+                f"5) Creative: {items.get('creative', '').strip()}\n"
+            )
+
+        me_text = _fmt(me_items)
+        partner_text = _fmt(partner_items)
+
+        prompt = f"""
+Given these two bucket lists and the city "{city}", suggest 2-4 real places they could visit together.
+Return a JSON array of objects with fields: name, note, type (travel|food|adventure|creative|experience).
+Keep names short and plausible for the city. Notes should be 4-12 words, no emojis.
+
+Bucket list A:
+{me_text}
+
+Bucket list B:
+{partner_text}
+
+Return ONLY JSON. No extra text.
+"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You suggest plausible real-world venues for two people based on their bucket lists."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.5,
+                max_tokens=300
+            )
+            content = response.choices[0].message.content.strip()
+            import json
+            ideas = json.loads(content)
+            cleaned = []
+            for t in ideas:
+                if not isinstance(t, dict):
+                    continue
+                cleaned.append({
+                    "name": t.get("name", "").strip(),
+                    "note": t.get("note", "").strip(),
+                    "type": t.get("type", "").strip() or "experience",
+                })
+            return cleaned[:4] if cleaned else []
+        except Exception as e:
+            logger.error(f"Error generating bucketlist place ideas: {e}")
+            # Fallback generic ideas
+            return [
+                {"name": f"{city} food crawl", "note": "Ramen then sushi/omakase", "type": "food"},
+                {"name": f"{city} art studio", "note": "Painting/drawing session", "type": "creative"},
+                {"name": f"{city} shrine or temple", "note": "Sketch and explore", "type": "adventure"},
+            ]
     
     def generate_profile_resume(
         self,
