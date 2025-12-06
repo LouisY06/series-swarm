@@ -6,5 +6,11 @@ from .series_api import SeriesAPI
 from .switchboard import Switchboard
 from .commands import CommandHandler
 
-__all__ = ['KafkaConsumer', 'KafkaProducer', 'SeriesAPI', 'Switchboard', 'CommandHandler']
+__all__ = [
+    'KafkaConsumer',
+    'KafkaProducer',
+    'SeriesAPI',
+    'Switchboard',
+    'CommandHandler',
+]
 
