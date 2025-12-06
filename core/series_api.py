@@ -23,8 +23,9 @@ class SeriesAPI:
         """
         self.api_key = api_key
         if base_url is None:
-            base_url = os.getenv('SERIES_API_URL', 'https://api.series.im')
+            base_url = os.getenv('SERIES_API_URL', os.getenv('API_BASE', 'https://api.series.im'))
         self.base_url = base_url.rstrip('/')
+        # Use Authorization header with Bearer token (as per API docs)
         self.headers = {
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json'
@@ -150,15 +151,24 @@ class SeriesAPI:
             }]
 
         try:
+            logger.info(f"POST {url}")
+            logger.debug(f"Headers: {dict(self.headers)}")
             response = requests.post(url, json=payload, headers=self.headers, timeout=30)
             response.raise_for_status()
             result = response.json()
             logger.info(f"Message sent successfully to chat {chat_id}")
             return result
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"API HTTP error: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response status: {e.response.status_code}")
+                logger.error(f"Response body: {e.response.text[:500]}")
+            return None
         except requests.exceptions.RequestException as e:
             logger.error(f"API request failed: {e}")
             if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response: {e.response.text}")
+                logger.error(f"Response status: {e.response.status_code}")
+                logger.error(f"Response body: {e.response.text[:500]}")
             return None
 
     def get_chat_id_from_message(self, message_data: Dict[str, Any]) -> Optional[int]:
