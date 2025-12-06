@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Optional, Dict, Any
 from confluent_kafka import Consumer, KafkaError
 
@@ -25,12 +26,16 @@ class KafkaConsumer:
         self.topic = topic
         self.group_id = group_id
 
+        # Use static group ID to maintain a single consumer group
+        # This ensures only one consumer group exists in Kafka
         config = {
             'bootstrap.servers': broker,
             'group.id': group_id,
-            'auto.offset.reset': 'latest',
+            'auto.offset.reset': 'latest',  # Start from latest if no committed offset
             'enable.auto.commit': True,
         }
+        
+        logger.info(f"Using consumer group: {group_id} (static)")
 
         if client_id:
             config['client.id'] = client_id
@@ -46,7 +51,7 @@ class KafkaConsumer:
 
         self.consumer = Consumer(config)
         self.consumer.subscribe([topic])
-        logger.info(f"Consumer initialized for topic: {topic}")
+        logger.info(f"Consumer initialized for topic: {topic} (will start from latest messages)")
 
     def consume(self, timeout: float = 1.0) -> Optional[Dict[str, Any]]:
         """Consume a single message."""
@@ -62,11 +67,18 @@ class KafkaConsumer:
                 logger.error(f"Consumer error: {msg.error()}")
                 return None
 
+            # Log that we received a raw message from Kafka
+            logger.info(f"📥 Raw Kafka message received (partition: {msg.partition()}, offset: {msg.offset()})")
+
             try:
                 value = json.loads(msg.value().decode('utf-8'))
             except (json.JSONDecodeError, UnicodeDecodeError) as e:
                 logger.debug(f"Skipping non-JSON message: {e}")
                 return None  # Skip binary messages silently
+
+            # Log the event type before returning
+            event_type = value.get('event_type', 'unknown')
+            logger.info(f"   Event type: {event_type}")
 
             return {
                 'key': msg.key().decode('utf-8') if msg.key() else None,

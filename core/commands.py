@@ -10,7 +10,7 @@ class CommandHandler:
     """Handles user commands."""
 
     COMMANDS = {
-        'match': ['/match', 'match', 'hi', 'hello', 'start'],
+        'match': ['/match'],
         'end': ['/end', 'end', '/next', 'next', '/skip', 'skip', 'bye'],
         'reveal': ['/reveal', 'reveal'],
         'setname': ['/setname'],
@@ -48,7 +48,7 @@ class CommandHandler:
         if not arg:
             return "Usage: /setname <your name>"
         switchboard.store_user_profile(user_phone, {'name': arg})
-        return f"✅ Name set to: {arg}"
+        return f"Name set to: {arg}"
 
     @staticmethod
     def handle_setemail(switchboard, user_phone: str, arg: str) -> str:
@@ -56,9 +56,9 @@ class CommandHandler:
         if not arg:
             return "Usage: /setemail <your email>"
         if '@' not in arg:
-            return "❌ Invalid email format"
+            return "Invalid email format"
         switchboard.store_user_profile(user_phone, {'email': arg})
-        return f"✅ Email set to: {arg}"
+        return f"Email set to: {arg}"
 
     @staticmethod
     def handle_setphone(switchboard, user_phone: str, arg: str) -> str:
@@ -66,15 +66,15 @@ class CommandHandler:
         if not arg:
             return "Usage: /setphone <phone number>"
         switchboard.store_user_profile(user_phone, {'phone': arg})
-        return f"✅ Phone set to: {arg}"
+        return f"Phone set to: {arg}"
 
     @staticmethod
     def handle_profile(switchboard, user_phone: str) -> str:
         """Handle /profile command."""
         profile = switchboard.get_user_profile(user_phone)
         if not profile or len(profile) <= 1:
-            return "📋 Profile empty. Use /setname, /setemail to add info."
-        lines = ["📋 Your Profile:"]
+            return "Profile empty. Use /setname, /setemail to add info."
+        lines = ["Your Profile:"]
         for key, value in profile.items():
             lines.append(f"  {key.capitalize()}: {value}")
         return "\n".join(lines)
@@ -82,7 +82,7 @@ class CommandHandler:
     @staticmethod
     def handle_help() -> str:
         """Handle /help command."""
-        return """📖 Commands:
+        return """Commands:
 
 /match - Find someone to chat with
 /end - Disconnect from current chat

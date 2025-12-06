@@ -77,14 +77,18 @@ class SeriesAPI:
             }]
 
         try:
+            logger.info(f"Sending message to chat {chat_id}: '{text[:50]}'")
+            logger.debug(f"   Payload: {payload}")
             response = requests.post(url, json=payload, headers=self.headers, timeout=30)
             response.raise_for_status()
-            logger.info(f"Sent message to chat {chat_id}")
-            return response.json()
+            result = response.json()
+            logger.info(f"Sent message to chat {chat_id} - Response: {result}")
+            return result
         except requests.exceptions.RequestException as e:
-            logger.error(f"API error: {e}")
+            logger.error(f"API error sending to chat {chat_id}: {e}")
             if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response: {e.response.text[:200]}")
+                logger.error(f"   Response status: {e.response.status_code}")
+                logger.error(f"   Response text: {e.response.text[:200]}")
             return None
 
     def _create_chat(

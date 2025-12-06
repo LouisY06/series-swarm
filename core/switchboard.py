@@ -52,10 +52,12 @@ class Switchboard:
         """
         # Don't match if already paired
         if user_phone in self.active_pairs:
+            logger.info(f"User {user_phone} already paired with {self.active_pairs[user_phone]}")
             return self.active_pairs[user_phone]
 
-        # Remove from queue if already there
+        # Remove from queue if already there (avoid duplicates)
         if user_phone in self.waiting_queue:
+            logger.warning(f"{user_phone} was already in queue! Removing duplicate.")
             self.waiting_queue.remove(user_phone)
 
         # Check if anyone is waiting
@@ -64,12 +66,13 @@ class Switchboard:
             # Create bidirectional mapping
             self.active_pairs[user_phone] = partner
             self.active_pairs[partner] = user_phone
-            logger.info(f"Matched {user_phone} with {partner}")
+            logger.info(f"Matched {user_phone} with {partner} (queue had {len(self.waiting_queue)} remaining)")
             return partner
         else:
             # Add to queue
             self.waiting_queue.append(user_phone)
             logger.info(f"User {user_phone} added to queue (size: {len(self.waiting_queue)})")
+            logger.info(f"   Queue contents: {self.waiting_queue}")
             return None
 
     def end_chat(self, user_phone: str) -> Optional[str]:

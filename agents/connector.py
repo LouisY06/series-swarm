@@ -56,6 +56,25 @@ def generate_vcard(contact_data: Dict[str, Any]) -> BytesIO:
             vcard.email.value = email
             vcard.email.type_param = 'INTERNET'
 
+        # Add notes with interests/hobbies and other info
+        notes_parts = []
+        interests = contact_data.get('interests', '').strip()
+        bio = contact_data.get('bio', '').strip()
+        
+        if interests:
+            notes_parts.append(f"Interests: {interests}")
+        if bio:
+            notes_parts.append(bio)
+        
+        # Add any other fields that might be useful
+        for key, value in contact_data.items():
+            if key not in ['name', 'phone', 'email', 'interests', 'bio'] and value:
+                notes_parts.append(f"{key.capitalize()}: {value}")
+        
+        if notes_parts:
+            vcard.add('note')
+            vcard.note.value = '\n'.join(notes_parts)
+
         # Serialize to BytesIO
         vcf_string = vcard.serialize()
         vcard_io = BytesIO(vcf_string.encode('utf-8'))

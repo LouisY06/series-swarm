@@ -182,4 +182,94 @@ Format as bullet points, one per line starting with "-".
         
         state_manager.set_profile(viewer_id, other_id, viewer_profile)
         logger.info(f"Updated profile for {viewer_id} viewing {other_id}: level {new_level}")
+    
+    def extract_user_profile(self, initial_message: str, phone_number: str) -> Dict[str, str]:
+        """
+        Extract user profile information from their initial message.
+        Returns a dict with name, email, phone, and any other relevant info.
+        Uses a cheaper model (gpt-4o-mini) for this task.
+        """
+        prompt = f"""Extract profile information from this user's initial message. 
+The user's phone number (from message) is: {phone_number}
+
+User's message:
+{initial_message}
+
+Extract the following information if mentioned:
+- name: Their name (first name is fine, or full name if given)
+- email: Their email address (if mentioned)
+- phone: Their phone number (if they provide a different phone number than {phone_number})
+- interests: Their interests, hobbies, or what they're looking for (can be a list or description)
+
+Return ONLY a JSON object with these fields. If a field is not mentioned, set it to null.
+Format: {{"name": "...", "email": "...", "phone": "...", "interests": "..."}}
+
+Be concise and only extract what's actually stated. Don't make up information."""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",  # Use cheaper model
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'You extract user profile information from text messages. Return only valid JSON.'
+                    },
+                    {'role': 'user', 'content': prompt}
+                ],
+                temperature=0.3,  # Lower temperature for more consistent extraction
+                max_tokens=200
+            )
+            
+            import json
+            result_text = response.choices[0].message.content.strip()
+            # Try to extract JSON from the response (might have markdown code blocks)
+            if "```json" in result_text:
+                result_text = result_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in result_text:
+                result_text = result_text.split("```")[1].split("```")[0].strip()
+            
+            profile = json.loads(result_text)
+            # Filter out null values
+            profile = {k: v for k, v in profile.items() if v is not None and v != "null" and v != ""}
+            logger.info(f"Extracted profile from message: {profile}")
+            return profile
+            
+        except Exception as e:
+            logger.error(f"Error extracting profile: {e}")
+            # Fallback: try to extract name from message using regex
+            profile = {}
+            import re
+            # Try to find name patterns
+            name_patterns = [
+                r"(?:i'?m|my name is|call me|i am|this is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+                r"^([A-Z][a-z]+)\s+here",
+                r"name['\s]*:?\s*([A-Z][a-z]+)"
+            ]
+            for pattern in name_patterns:
+                name_match = re.search(pattern, initial_message, re.IGNORECASE)
+                if name_match:
+                    profile["name"] = name_match.group(1).strip()
+                    break
+            
+            # Try to find email
+            email_match = re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', initial_message)
+            if email_match:
+                profile["email"] = email_match.group(0)
+            
+            # Try to find phone number (different from sender's phone)
+            phone_patterns = [
+                r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b',  # US format
+                r'\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b',  # With country code
+            ]
+            for pattern in phone_patterns:
+                phone_match = re.search(pattern, initial_message)
+                if phone_match:
+                    found_phone = phone_match.group(0).strip()
+                    # Only use if it's different from the sender's phone
+                    if found_phone.replace('-', '').replace(' ', '').replace('(', '').replace(')', '').replace('.', '') != phone_number.replace('+', '').replace('-', '').replace(' ', '').replace('(', '').replace(')', '').replace('.', ''):
+                        profile["phone"] = found_phone
+                        break
+            
+            logger.info(f"Fallback profile extraction: {profile}")
+            return profile
 
