@@ -855,8 +855,32 @@ Send /help for all commands."""
         """Provide top-rated places per bucketlist theme on demand."""
         partner = self.state.get_partner(phone)
         if not partner:
-            self.send(chat_id, phone, "You need to be in a conversation first.")
-            return True
+            # Try to recover partner from stored bucketlist (e.g., after restart)
+            partner = self.state.find_partner_from_bucketlist(phone)
+            if not partner:
+                # Try from cached profile bucketlist_with
+                try:
+                    prof_self = self.switchboard.get_user_profile(phone) or {}
+                    bucket_key = "bucketlist_with"
+                    cached = prof_self.get(bucket_key, {})
+                    if cached:
+                        partner = next(iter(cached.keys()))
+                        cached_entry = cached.get(partner, {})
+                        if cached_entry:
+                            # Rehydrate state so downstream logic works
+                            self.state.set_bucketlist(phone, partner, cached_entry.get("self", {}))
+                            self.state.set_bucketlist(partner, phone, cached_entry.get("partner", {}))
+                except Exception as e:
+                    logger.error(f"Failed to recover partner for topspots: {e}", exc_info=True)
+
+            if partner:
+                # Restore chatting state so we don't block the command
+                self.state.set_partner(phone, partner)
+                self.state.set_status(phone, Status.CHATTING)
+                self.state.set_status(partner, Status.CHATTING)
+            else:
+                self.send(chat_id, phone, "You need to be in a conversation first.")
+                return True
 
         pair_entries = self.state.get_bucketlist_pair(phone, partner)
         # If not in memory (e.g., after restart), try to recover from profiles

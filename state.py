@@ -247,6 +247,14 @@ class StateManager:
         self.bucketlist_entries.pop(pid, None)
         self.bucketlist_active.pop(pid, None)
 
+    def find_partner_from_bucketlist(self, user_id: str) -> Optional[str]:
+        """Infer partner from any stored bucketlist entries containing user_id."""
+        for pid, entries in self.bucketlist_entries.items():
+            if user_id in pid:
+                other = pid[0] if pid[1] == user_id else pid[1]
+                return other
+        return None
+
     # City confirmation helpers
     def set_pending_city(self, user_a: str, user_b: str, city: str, set_by: str):
         pid = self.pair_id_for(user_a, user_b)
