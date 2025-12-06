@@ -904,10 +904,10 @@ Send /help for all commands."""
 
     def handle_spotify(self, phone: str, chat_id: Optional[int]) -> bool:
         """Send a Spotify auth link for the user to connect their account."""
-        client_id = os.getenv("SPOTIPY_CLIENT_ID")
-        redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI")
+        client_id = os.getenv("SPOTIFY_CLIENT_ID")
+        redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI")
         if not client_id or not redirect_uri:
-            self.send(chat_id, phone, "Spotify is not configured yet. Set SPOTIPY_CLIENT_ID and SPOTIPY_REDIRECT_URI.")
+            self.send(chat_id, phone, "Spotify is not configured yet. Set SPOTIFY_CLIENT_ID and SPOTIFY_REDIRECT_URI.")
             return True
 
         state = uuid.uuid4().hex
