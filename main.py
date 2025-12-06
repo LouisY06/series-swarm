@@ -249,6 +249,12 @@ class SeriesSwarm:
 
         elif cmd == 'we':
             return self.handle_we(phone, chat_id)
+        elif cmd == 'mood':
+            return self.handle_mood(phone, chat_id)
+        elif cmd == 'topics':
+            return self.handle_topics(phone, chat_id)
+        elif cmd == 'icebreaker':
+            return self.handle_icebreaker_command(phone, chat_id)
 
         else:
             response = self.commands.execute_command(self.switchboard, phone, cmd, arg)
@@ -323,8 +329,15 @@ Anytime you want, send /help for commands."""
             self.state.set_status(user_id, Status.READY)
             self.send(chat_id, user_id, "You're not in a conversation. Send /match to meet someone.")
             return True
+
+        # Icebreaker flow intercepts and handles privately
+        if self.handle_icebreaker_flow(user_id, chat_id, partner, text):
+            return True
         
-        # Record message
+        # Capture partner last message time before we record this one
+        partner_last_ts = self.state.get_last_message_ts_for_user(partner)
+
+        # Record message and capture last message ts
         self.state.record_message(user_id, partner, text)
         
         # Forward to partner ASAP
@@ -351,6 +364,23 @@ Anytime you want, send /help for commands."""
                 if changed_partner and chat_id_partner:
                     self.send(chat_id_partner, partner, f"🎯 Profile level {new_level_partner} unlocked. Use /card to see more.")
 
+                # Conversation coach nudges every 6 messages
+                if total_messages >= 6 and total_messages % 6 == 0 and chat_id_self:
+                    conversation = self.state.get_conversation(user_id, partner)
+                    nudge = self.ai.generate_coach_nudge(conversation)
+                    self.send(chat_id_self, user_id, f"💡 {nudge}")
+
+                # Small-talk rescue: if stalled (long gap or one-word replies)
+                now = time.time()
+                gap_partner = now - partner_last_ts if partner_last_ts else 0
+                recent_msgs = self.state.get_last_messages_for_user(user_id)
+                short_count = sum(1 for m in recent_msgs if len(m.strip().split()) <= 2)
+                is_one_word_run = len(recent_msgs) >= 4 and short_count >= 3
+                if chat_id_self and (gap_partner > 180 or is_one_word_run):
+                    conversation = self.state.get_conversation(user_id, partner)
+                    rescue = self.ai.generate_rescue_prompt(conversation)
+                    self.send(chat_id_self, user_id, f"🤝 {rescue}")
+
                 logger.info(f"Async profile update done for {user_id} <-> {partner} (total {total_messages})")
             except Exception as e:
                 logger.error(f"Async profile update error: {e}", exc_info=True)
@@ -370,6 +400,140 @@ Anytime you want, send /help for commands."""
         conversation = self.state.get_conversation(user_id, partner)
         summary = self.ai.generate_shared_profile(conversation)
         self.send(chat_id, user_id, "Here's what I notice about the two of you:\n\n" + summary)
+        return True
+
+    def handle_mood(self, user_id: str, chat_id: Optional[int]) -> bool:
+        """Handle /mood command."""
+        partner = self.state.get_partner(user_id)
+        if not partner:
+            self.send(chat_id, user_id, "You are not in a conversation. Send /match to meet someone.")
+            return True
+        conversation = self.state.get_conversation(user_id, partner)
+        if not conversation:
+            self.send(chat_id, user_id, "I need a few messages first to read the mood.")
+            return True
+        mood = self.ai.generate_mood(conversation)
+        self.send(chat_id, user_id, f"Current vibe: {mood}")
+        return True
+
+    def handle_topics(self, user_id: str, chat_id: Optional[int]) -> bool:
+        """Handle /topics command."""
+        partner = self.state.get_partner(user_id)
+        if not partner:
+            self.send(chat_id, user_id, "You are not in a conversation. Send /match to meet someone.")
+            return True
+        conversation = self.state.get_conversation(user_id, partner)
+        if not conversation:
+            self.send(chat_id, user_id, "I need some messages to extract topics.")
+            return True
+        topics = self.ai.generate_topics(conversation)
+        self.send(chat_id, user_id, "Topics you've covered:\n" + topics)
+        return True
+
+    def handle_icebreaker_command(self, user_id: str, chat_id: Optional[int]) -> bool:
+        """Start Two Truths and a Lie icebreaker."""
+        partner = self.state.get_partner(user_id)
+        if not partner:
+            self.send(chat_id, user_id, "You are not in a conversation. Send /match to meet someone.")
+            return True
+
+        self.state.start_icebreaker(user_id, partner)
+        partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+
+        intro_msg = (
+            "🎲 Two Truths and a Lie!\n\n"
+            "Send me your three statements privately like this:\n"
+            "me: statement1 / statement2 / statement3*\n\n"
+            "- Mark the lie with a * at the end of that statement.\n"
+            "I won't show the * to your partner.\n"
+            "They'll guess 1-3 which is the lie."
+        )
+        self.send(chat_id, user_id, intro_msg)
+        if partner_chat:
+            self.send(partner_chat, partner, intro_msg)
+        return True
+
+    def handle_icebreaker_flow(self, user_id: str, chat_id: Optional[int], partner: str, text: str) -> bool:
+        """Process icebreaker submissions/guesses. Returns True if handled."""
+        if not self.state.icebreaker_active(user_id, partner):
+            return False
+
+        t = text.strip()
+        lower = t.lower()
+
+        # Statements submission
+        if lower.startswith("me:"):
+            payload = t[3:].strip()
+            parts = [p.strip() for p in payload.split("/") if p.strip()]
+            if len(parts) != 3:
+                self.send(chat_id, user_id, "Please send exactly 3 statements separated by '/'. Mark the lie with *.")
+                return True
+            lie_index = None
+            clean_parts = []
+            for idx, p in enumerate(parts):
+                if p.endswith("*"):
+                    lie_index = idx
+                    p = p[:-1].rstrip()
+                clean_parts.append(p)
+            if lie_index is None:
+                self.send(chat_id, user_id, "Please mark the lie with a * at the end of that statement.")
+                return True
+
+            self.state.set_icebreaker_statements(user_id, partner, clean_parts, lie_index)
+            self.send(chat_id, user_id, "Got your statements. Waiting for your partner.")
+
+            ib = self.state.get_icebreaker(user_id, partner)
+            partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+
+            # If both have submitted, send to each partner
+            if partner in ib["statements"] and user_id in ib["statements"]:
+                # send partner's statements to user
+                partner_stmts = ib["statements"][partner]
+                formatted = "\n".join([f"{i+1}. {s}" for i, s in enumerate(partner_stmts)])
+                self.send(chat_id, user_id, f"Here are your partner's statements:\n{formatted}\nWhich one is the lie? Reply 1-3.")
+
+                user_stmts = ib["statements"][user_id]
+                formatted_user = "\n".join([f"{i+1}. {s}" for i, s in enumerate(user_stmts)])
+                if partner_chat:
+                    self.send(partner_chat, partner, f"Here are your partner's statements:\n{formatted_user}\nWhich one is the lie? Reply 1-3.")
+            return True
+
+        # Guess handling
+        if lower.isdigit() and lower in {"1", "2", "3"}:
+            guess_index = int(lower) - 1
+        elif lower.startswith("guess:"):
+            guess_payload = lower[6:].strip()
+            if guess_payload.isdigit() and guess_payload in {"1", "2", "3"}:
+                guess_index = int(guess_payload) - 1
+            else:
+                self.send(chat_id, user_id, "Guess with a number 1-3.")
+                return True
+        else:
+            # Not an icebreaker message
+            return False
+
+        ib = self.state.get_icebreaker(user_id, partner)
+        partner_stmts = ib["statements"].get(partner)
+        partner_lie = ib["lie_index"].get(partner)
+        if not partner_stmts or partner_lie is None:
+            self.send(chat_id, user_id, "I'm still waiting for your partner's statements.")
+            return True
+
+        self.state.set_icebreaker_guess(user_id, partner, guess_index)
+        if guess_index == partner_lie:
+            self.send(chat_id, user_id, "✅ Correct! You spotted the lie.")
+        else:
+            self.send(chat_id, user_id, f"❌ Not quite. The lie was number {partner_lie + 1}.")
+
+        # Check if both guessed, then clear
+        partner_guess = ib["guesses"].get(partner)
+        if partner_guess is not None and ib["guesses"].get(user_id) is not None:
+            partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+            self.send(chat_id, user_id, "Icebreaker complete! Keep chatting or try /icebreaker again.")
+            if partner_chat:
+                self.send(partner_chat, partner, "Icebreaker complete! Keep chatting or try /icebreaker again.")
+            self.state.clear_icebreaker(user_id, partner)
+
         return True
 
     def handle_card(self, user_id: str, chat_id: Optional[int]) -> bool:

@@ -2,6 +2,7 @@
 
 from enum import Enum
 from collections import defaultdict, deque
+import time
 from typing import Dict, List, Tuple, Optional
 
 
@@ -25,6 +26,8 @@ class StateManager:
         self.user_intro: Dict[str, str] = {}
         self.current_partner: Dict[str, str] = {}
         self.user_chat_ids: Dict[str, int] = {}
+        self.last_user_message_ts: Dict[str, float] = defaultdict(float)
+        self.last_messages: Dict[str, List[str]] = defaultdict(list)
         
         # Matching state
         self.waiting_queue: deque = deque()
@@ -33,6 +36,10 @@ class StateManager:
         # Conversation and profile state
         self.pair_messages: Dict[Tuple[str, str], List[Dict[str, str]]] = defaultdict(list)
         self.pair_profiles: Dict[Tuple[str, str], Dict[str, Dict[str, any]]] = defaultdict(dict)
+        self.pair_last_message_ts: Dict[Tuple[str, str], float] = defaultdict(float)
+        
+        # Icebreaker state per pair
+        self.icebreakers: Dict[Tuple[str, str], Dict[str, any]] = {}
     
     def get_status(self, user_id: str) -> Status:
         """Get user status, defaulting to IDLE for new users."""
@@ -85,6 +92,12 @@ class StateManager:
             "from": sender,
             "text": text
         })
+        self.pair_last_message_ts[pid] = time.time()
+        self.last_user_message_ts[sender] = time.time()
+        self.last_messages[sender].append(text)
+        # Keep only the last 5 messages per user
+        if len(self.last_messages[sender]) > 5:
+            self.last_messages[sender] = self.last_messages[sender][-5:]
     
     def get_message_count(self, user_a: str, user_b: str) -> int:
         """Get total message count for a pair."""
@@ -109,6 +122,19 @@ class StateManager:
         """Set profile that viewer_id has of other_id."""
         pid = self.pair_id_for(viewer_id, other_id)
         self.pair_profiles[pid][viewer_id] = profile
+
+    def get_last_message_ts_for_pair(self, a: str, b: str) -> float:
+        """Get last message timestamp for the pair."""
+        pid = self.pair_id_for(a, b)
+        return self.pair_last_message_ts.get(pid, 0)
+
+    def get_last_message_ts_for_user(self, user_id: str) -> float:
+        """Get last message timestamp for a user."""
+        return self.last_user_message_ts.get(user_id, 0)
+
+    def get_last_messages_for_user(self, user_id: str) -> List[str]:
+        """Get recent messages for a user (up to last 5)."""
+        return self.last_messages.get(user_id, [])
     
     def add_to_queue(self, user_id: str):
         """Add user to waiting queue."""
@@ -145,4 +171,44 @@ class StateManager:
     def clear_pending_accept(self, user_id: str):
         """Clear pending accept state."""
         self.pending_accept.pop(user_id, None)
+
+    # Icebreaker helpers
+    def _get_ib(self, a: str, b: str) -> Dict[str, any]:
+        pid = self.pair_id_for(a, b)
+        if pid not in self.icebreakers:
+            self.icebreakers[pid] = {
+                "active": False,
+                "statements": {},
+                "lie_index": {},
+                "guesses": {}
+            }
+        return self.icebreakers[pid]
+
+    def start_icebreaker(self, a: str, b: str):
+        ib = self._get_ib(a, b)
+        ib["active"] = True
+        ib["statements"] = {}
+        ib["lie_index"] = {}
+        ib["guesses"] = {}
+
+    def set_icebreaker_statements(self, user: str, partner: str, statements: list, lie_index: int):
+        ib = self._get_ib(user, partner)
+        ib["active"] = True
+        ib["statements"][user] = statements
+        ib["lie_index"][user] = lie_index
+
+    def set_icebreaker_guess(self, user: str, partner: str, guess_index: int):
+        ib = self._get_ib(user, partner)
+        ib["guesses"][user] = guess_index
+
+    def get_icebreaker(self, a: str, b: str) -> Dict[str, any]:
+        return self._get_ib(a, b)
+
+    def clear_icebreaker(self, a: str, b: str):
+        pid = self.pair_id_for(a, b)
+        if pid in self.icebreakers:
+            self.icebreakers.pop(pid, None)
+
+    def icebreaker_active(self, a: str, b: str) -> bool:
+        return self._get_ib(a, b).get("active", False)
 

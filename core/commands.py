@@ -19,6 +19,9 @@ class CommandHandler:
         'profile': ['/profile', 'profile'],
         'help': ['/help', 'help', '?'],
         'we': ['/we', 'we'],
+        'mood': ['/mood', 'mood'],
+        'topics': ['/topics', 'topics'],
+        'icebreaker': ['/icebreaker', 'icebreaker'],
     }
 
     @staticmethod
@@ -91,6 +94,10 @@ class CommandHandler:
 /setname <name> - Set your name
 /setemail <email> - Set your email
 /profile - View your profile
+/we - Shared profile of your conversation
+/mood - Current tone from recent chat
+/topics - Key topics from recent chat
+/icebreaker - Start Two Truths and a Lie
 /help - Show this message"""
 
     @staticmethod

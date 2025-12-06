@@ -217,42 +217,97 @@ Format as bullet points, one per line starting with "-".
         logger.info(f"Updated profile for {viewer_id} viewing {other_id}: level {new_level}")
         return new_level, old_level, new_level != old_level
 
-    def generate_shared_profile(self, conversation) -> str:
-        """Generate a shared 'we-profile' based on the conversation."""
-        conv_text = "\n".join([
-            f"{msg['from']}: {msg['text']}"
-            for msg in conversation[-50:]
-        ])
-
-        prompt = f"""You are summarizing the shared dynamics between two anonymous people based only on their conversation.
-
+    def generate_mood(self, conversation: List[Dict[str, str]]) -> str:
+        """Summarize tone/mood from recent conversation."""
+        conv_text = "\n".join([f"{m['from']}: {m['text']}" for m in conversation[-30:]])
+        prompt = f"""Read the recent conversation and describe the current tone in 1-2 sentences using simple words.
+Be concise, no emojis.
 Conversation:
 {conv_text}
-
-Write 3-5 bullet points about their shared themes, rapport, and style. 
-Be specific, avoid inventing facts, no emojis. Under 400 characters."""
-
+"""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {
-                        'role': 'system',
-                        'content': 'You describe the relationship dynamics between two people succinctly and accurately.'
-                    },
+                    {'role': 'system', 'content': 'You summarize tone briefly and clearly.'},
+                    {'role': 'user', 'content': prompt}
+                ],
+                temperature=0.4,
+                max_tokens=120
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Error generating mood: {e}")
+            return "The conversation feels neutral and open."
+
+    def generate_topics(self, conversation: List[Dict[str, str]]) -> str:
+        """Extract key topics from recent conversation."""
+        conv_text = "\n".join([f"{m['from']}: {m['text']}" for m in conversation[-40:]])
+        prompt = f"""List 3-6 key topics these two people have discussed, as short bullet points, no emojis.
+Conversation:
+{conv_text}
+"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {'role': 'system', 'content': 'You extract concise topic lists from chat logs.'},
+                    {'role': 'user', 'content': prompt}
+                ],
+                temperature=0.4,
+                max_tokens=120
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Error generating topics: {e}")
+            return "- Small talk\n- Interests\n- Plans"
+
+    def generate_coach_nudge(self, conversation: List[Dict[str, str]]) -> str:
+        """Provide a short nudge with summary + suggested question."""
+        conv_text = "\n".join([f"{m['from']}: {m['text']}" for m in conversation[-12:]])
+        prompt = f"""You are a gentle conversation coach. In 2-3 short lines:
+1) Briefly reflect what they seem interested in.
+2) Suggest one specific next question they can ask.
+No emojis. Keep under 200 characters total.
+Conversation:
+{conv_text}
+"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {'role': 'system', 'content': 'You give concise, friendly conversation nudges.'},
                     {'role': 'user', 'content': prompt}
                 ],
                 temperature=0.5,
-                max_tokens=220
+                max_tokens=120
             )
-            summary = response.choices[0].message.content.strip()
-            logger.info(f"Generated shared profile: {summary[:100]}...")
-            return summary
+            return response.choices[0].message.content.strip()
         except Exception as e:
-            logger.error(f"Error generating shared profile: {e}")
-            return (
-                "- You have some shared interests.\n"
-                "- The tone feels friendly and open.\n"
-                "- Keep exploring topics you both enjoy."
+            logger.error(f"Error generating coach nudge: {e}")
+            return "Maybe ask a follow-up about something they mentioned and why it matters to them."
+
+    def generate_rescue_prompt(self, conversation: List[Dict[str, str]]) -> str:
+        """Provide a small-talk rescue prompt for stalled conversations."""
+        conv_text = "\n".join([f"{m['from']}: {m['text']}" for m in conversation[-12:]])
+        prompt = f"""The chat stalled (long gaps or one-word replies).
+Give one short, friendly prompt to restart the chat, tailored to what they discussed.
+No emojis. Under 150 characters.
+Conversation:
+{conv_text}
+"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {'role': 'system', 'content': 'You revive chats with concise, friendly prompts.'},
+                    {'role': 'user', 'content': prompt}
+                ],
+                temperature=0.6,
+                max_tokens=90
             )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Error generating rescue prompt: {e}")
+            return "Maybe ask them about something fun they mentioned earlier and why they enjoy it."
 
