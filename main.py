@@ -20,6 +20,13 @@ from icebreakers.imessage import parse_statements, format_partner_share
 from icebreakers.bucketlist import parse_bucketlist, format_shared_bucketlist, format_captured
 from realworld.bucketlist import get_real_world_recommendations, get_top_bucketlist_spots
 
+# Music Quiz feature (optional - gracefully handles missing dependencies)
+try:
+    from features.music_quiz import SpotifyClient, GeniusClient, QuizGame
+    MUSIC_QUIZ_AVAILABLE = True
+except ImportError:
+    MUSIC_QUIZ_AVAILABLE = False
+
 load_dotenv()
 
 logging.basicConfig(
@@ -73,6 +80,20 @@ class SeriesSwarm:
         self.skip_ai_after_prompt = set()
         self.running = False
         self.processed_messages = set()  # Track processed messages to prevent duplicates
+        
+        # Initialize music quiz feature if available
+        self.quiz_game = None
+        if MUSIC_QUIZ_AVAILABLE:
+            try:
+                spotify_client = SpotifyClient()
+                genius_client = GeniusClient()
+                if spotify_client.is_available() and genius_client.is_available():
+                    self.quiz_game = QuizGame(spotify_client, genius_client)
+                    logger.info("Music quiz feature initialized")
+                else:
+                    logger.warning("Music quiz feature disabled (missing API keys)")
+            except Exception as e:
+                logger.warning(f"Music quiz feature disabled: {e}")
 
         logger.info("SeriesSwarm initialized")
 
@@ -303,6 +324,10 @@ class SeriesSwarm:
             return self.handle_icebreakers(phone, chat_id)
         elif cmd == 'bucketlist':
             return self.handle_bucketlist(phone, chat_id)
+        elif cmd == 'spotify':
+            return self.handle_spotify(phone, chat_id)
+        elif cmd == 'quiz':
+            return self.handle_quiz(phone, chat_id, arg)
         elif cmd == 'topspots':
             return self.handle_topspots(phone, chat_id)
 
@@ -976,6 +1001,95 @@ Send /help for all commands."""
         except Exception as e:
             logger.error(f"Error exchanging contacts: {e}")
             return False
+
+    # ==================== Music Quiz Feature ====================
+    
+    def handle_spotify(self, phone: str, chat_id: Optional[int]) -> bool:
+        """Handle /spotify command - link Spotify account."""
+        if not self.quiz_game:
+            self.send(chat_id, phone, "Music quiz feature is not available. Missing API configuration.")
+            return True
+        
+        # Check if already linked
+        if self.quiz_game.spotify.has_token(phone):
+            self.send(chat_id, phone, "Your Spotify is already linked! Use /quiz to start a music game.")
+            return True
+        
+        # Generate auth URL
+        auth_url = self.quiz_game.spotify.get_auth_url(phone)
+        if auth_url:
+            self.send(
+                chat_id, 
+                phone, 
+                f"Click this link to connect your Spotify:\n\n{auth_url}\n\nAfter authorizing, you can use /quiz to play!"
+            )
+        else:
+            self.send(chat_id, phone, "Couldn't generate Spotify link. Try again later.")
+        
+        return True
+    
+    def handle_quiz(self, phone: str, chat_id: Optional[int], arg: Optional[str]) -> bool:
+        """Handle /quiz command - start or interact with music quiz."""
+        if not self.quiz_game:
+            self.send(chat_id, phone, "Music quiz feature is not available.")
+            return True
+        
+        partner = self.state.get_partner(phone)
+        if not partner:
+            self.send(chat_id, phone, "You need to be matched with someone first. Use /match.")
+            return True
+        
+        # Check if there's an active quiz - if so, treat arg as a guess
+        active_quiz = self.quiz_game.get_active_quiz(phone)
+        if active_quiz and arg:
+            return self.handle_quiz_guess(phone, chat_id, arg)
+        
+        # Start a new quiz
+        can_start, reason = self.quiz_game.can_start_quiz(phone, partner)
+        if not can_start:
+            self.send(chat_id, phone, reason)
+            return True
+        
+        success, message, quiz = self.quiz_game.start_quiz(phone, partner)
+        if not success:
+            self.send(chat_id, phone, message)
+            return True
+        
+        # Send quiz to both users
+        quiz_msg = self.quiz_game.get_quiz_message(quiz)
+        partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+        
+        self.send(chat_id, phone, quiz_msg)
+        if partner_chat:
+            self.send(partner_chat, partner, quiz_msg)
+        
+        return True
+    
+    def handle_quiz_guess(self, phone: str, chat_id: Optional[int], guess: str) -> bool:
+        """Handle a quiz guess from a user."""
+        if not self.quiz_game:
+            return True
+        
+        is_correct, message, quiz = self.quiz_game.check_answer(phone, guess)
+        
+        if is_correct and quiz:
+            # Notify both users
+            partner = quiz.user_a if quiz.user_b == phone else quiz.user_b
+            partner_chat = self.state.get_chat_id(partner) or self.switchboard.get_chat_id(partner)
+            
+            winner_msg = f"You got it! {message}"
+            loser_msg = f"Your partner guessed it! The song was '{quiz.song_name}' by {quiz.artist}."
+            
+            self.send(chat_id, phone, winner_msg)
+            if partner_chat:
+                self.send(partner_chat, partner, loser_msg)
+            
+            # End the quiz
+            self.quiz_game.end_quiz(phone)
+        else:
+            self.send(chat_id, phone, message)
+        
+        return True
 
     def run(self):
         """Run the main loop."""

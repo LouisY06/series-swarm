@@ -100,6 +100,8 @@ class CommandHandler:
         'icebreaker': ['/icebreaker'],
         'icebreakers': ['/icebreakers'],
         'bucketlist': ['/bucketlist'],
+        'spotify': ['/spotify'],
+        'quiz': ['/quiz'],
     }
 
     @staticmethod
@@ -193,6 +195,8 @@ class CommandHandler:
 /setcity <city> - Set your city for local recs
 /icebreaker - Start Two Truths and a Lie
 /icebreakers - In-chat Two Truths and a Lie (truth, truth, lie)
+/spotify - Link your Spotify account
+/quiz - Play a lyrics guessing game with your partner
 /help - Show this message"""
 
     @staticmethod

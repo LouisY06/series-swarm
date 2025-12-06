@@ -1,0 +1,2 @@
+"""Features package for SeriesSwarm."""
+
